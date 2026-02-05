@@ -214,6 +214,12 @@ jobs:
           
           echo "✅ All Firebase dependencies and plugins removed from all files"
 
+      - name: Add Guava dependency
+        run: |
+          BUILD_FILE="app/build.gradle.kts"
+          sed -i '/dependencies {/a \    implementation("com.google.guava:guava:33.3.1-android")' "$BUILD_FILE"
+          echo "✅ Added Guava dependency"
+
       ##### 创建空的 google-services.json（占位，防止路径检查错误）#####
       - name: Create placeholder google-services.json
         run: |
