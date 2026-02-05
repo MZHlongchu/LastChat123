@@ -172,29 +172,47 @@ jobs:
       ##### 彻底移除所有 Firebase 和 Google 服务依赖 #####
       - name: Remove all Firebase and Google Services dependencies
         run: |
-          BUILD_FILE="app/build.gradle.kts"
+          APP_BUILD_FILE="app/build.gradle.kts"
+          ROOT_BUILD_FILE="build.gradle.kts"
           TOML_FILE="gradle/libs.versions.toml"
           
-          # 1. 移除 build.gradle.kts 中的 Firebase 库引用
-          sed -i '/platform(libs\.firebase\.bom)/d' "$BUILD_FILE"
-          sed -i '/implementation(libs\.firebase\.[^)]*)/d' "$BUILD_FILE"
+          echo "=== Before cleanup ==="
+          echo "--- Root build.gradle.kts (Firebase lines) ---"
+          grep -n "google.services\|firebase.crashlytics" "$ROOT_BUILD_FILE" || echo "No matches found"
           
-          # 2. 移除 Firebase Gradle 插件
-          sed -i '/alias(libs\.plugins\.google\.services)/d' "$BUILD_FILE"
-          sed -i '/alias(libs\.plugins\.firebase\.crashlytics)/d' "$BUILD_FILE"
+          # 1. 移除 app/build.gradle.kts 中的 Firebase 库引用
+          sed -i '/platform(libs\.firebase\.bom)/d' "$APP_BUILD_FILE"
+          sed -i '/implementation(libs\.firebase\.[^)]*)/d' "$APP_BUILD_FILE"
           
-          # 3. 可选：从 libs.versions.toml 中移除 Firebase 定义（清理）
-          # 保留版本定义但移除库引用，避免其他模块引用
+          # 2. 移除 app/build.gradle.kts 中的 Firebase Gradle 插件
+          sed -i '/alias(libs\.plugins\.google\.services)/d' "$APP_BUILD_FILE"
+          sed -i '/alias(libs\.plugins\.firebase\.crashlytics)/d' "$APP_BUILD_FILE"
+          
+          # 3. 关键修复：移除根目录 build.gradle.kts 中的 Firebase 插件引用
+          # 处理 apply false 的情况
+          sed -i '/alias(libs\.plugins\.google\.services)/d' "$ROOT_BUILD_FILE"
+          sed -i '/alias(libs\.plugins\.firebase\.crashlytics)/d' "$ROOT_BUILD_FILE"
+          
+          echo "=== After cleanup ==="
+          echo "--- Root build.gradle.kts (Firebase lines) ---"
+          grep -n "google.services\|firebase.crashlytics" "$ROOT_BUILD_FILE" || echo "No matches found"
+          
+          # 4. 从 libs.versions.toml 中移除 Firebase 库定义
           sed -i '/firebase-bom = { group = "com.google.firebase"/d' "$TOML_FILE"
           sed -i '/firebase-analytics = { group = "com.google.firebase"/d' "$TOML_FILE"
           sed -i '/firebase-crashlytics = { group = "com.google.firebase"/d' "$TOML_FILE"
           sed -i '/firebase-config = { group = "com.google.firebase"/d' "$TOML_FILE"
           
-          # 4. 移除 plugins 部分的 Firebase 插件定义
+          # 5. 从 libs.versions.toml 中移除 plugins 部分的 Firebase 插件定义
           sed -i '/google-services = { id = "com.google.gms.google-services"/d' "$TOML_FILE"
           sed -i '/firebase-crashlytics = { id = "com.google.firebase.crashlytics"/d' "$TOML_FILE"
           
-          echo "✅ All Firebase dependencies and plugins removed"
+          # 6. 同时移除 versions 部分的 firebase 版本号定义
+          sed -i '/^firebase-bom = "/d' "$TOML_FILE"
+          sed -i '/^firebase-crashlytics = "/d' "$TOML_FILE"
+          sed -i '/^google-services = "/d' "$TOML_FILE"
+          
+          echo "✅ All Firebase dependencies and plugins removed from all files"
 
       ##### 创建空的 google-services.json（占位，防止路径检查错误）#####
       - name: Create placeholder google-services.json
