@@ -246,6 +246,12 @@ jobs:
           
           echo "✅ Added Guava dependency"
 
+      ##### 改包名：lastchat.rikkafork.cocolal -> lastchat.ll3 #####
+      - name: Change package to lastchat.ll3
+        run: |
+          sed -i 's/applicationId = "lastchat.rikkafork.cocolal"/applicationId = "lastchat.ll3"/' app/build.gradle.kts
+          echo "✅ Package: lastchat.ll3"
+
       ##### 创建空的 google-services.json #####
       - name: Create placeholder google-services.json
         run: |
