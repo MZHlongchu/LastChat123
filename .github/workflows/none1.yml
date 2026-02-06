@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - "*zh*"
-      - "*plus4*"
+      - "*plus5*"
       - "[0-9]*"
 
 permissions:
