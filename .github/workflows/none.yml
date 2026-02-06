@@ -72,7 +72,7 @@ jobs:
           
           echo "✅ Auto-update functionality disabled in UpdateChecker.kt"
 
-      ##### 创建零依赖的 Firebase Stub 类 #####
+      ##### 创建零依赖的 Firebase Stub 类（保留，用于编译兼容） #####
       - name: Create Firebase stub classes
         run: |
           mkdir -p "app/src/main/java/com/google/firebase/analytics"
@@ -80,7 +80,7 @@ jobs:
           mkdir -p "app/src/main/java/com/google/firebase/crashlytics"
           mkdir -p "app/src/main/java/com/google/firebase"
 
-          # 1. FirebaseAnalytics 类 + 扩展属性
+          # 1. FirebaseAnalytics 类 + 扩展属性（仅用于兼容，无实际跟踪）
           cat > "app/src/main/java/com/google/firebase/analytics/FirebaseAnalytics.kt" << 'EOF'
           package com.google.firebase.analytics
           import android.content.Context
@@ -92,14 +92,14 @@ jobs:
                   fun getInstance(): FirebaseAnalytics = FirebaseAnalytics()
                   fun getInstance(context: Context): FirebaseAnalytics = FirebaseAnalytics()
               }
-              fun logEvent(key: String, bundle: Bundle?) {}
+              fun logEvent(key: String, bundle: Bundle?) {} // 空实现，无跟踪
           }
           
           val Firebase.analytics: FirebaseAnalytics
               get() = FirebaseAnalytics.getInstance()
           EOF
 
-          # 2. FirebaseRemoteConfig 类（无 Task 依赖，同步/空实现）
+          # 2. FirebaseRemoteConfig 类（无 Task 依赖，同步/空实现，无网络请求）
           cat > "app/src/main/java/com/google/firebase/remoteconfig/FirebaseRemoteConfig.kt" << 'EOF'
           package com.google.firebase.remoteconfig
           import com.google.firebase.Firebase
@@ -108,14 +108,14 @@ jobs:
               companion object {
                   fun getInstance(): FirebaseRemoteConfig = FirebaseRemoteConfig()
               }
-              fun getString(key: String): String = ""
+              fun getString(key: String): String = "" // 空实现，返回空字符串
               fun getLong(key: String): Long = 0L
               fun getBoolean(key: String): Boolean = false
               fun getDouble(key: String): Double = 0.0
-              fun setConfigSettingsAsync(settings: FirebaseRemoteConfigSettings) {}
-              fun setDefaultsAsync(defaults: Map<String, Any>) {}
-              fun setDefaultsAsync(resourceId: Int) {}
-              fun fetchAndActivate(): Boolean = true
+              fun setConfigSettingsAsync(settings: FirebaseRemoteConfigSettings) {} // 空实现
+              fun setDefaultsAsync(defaults: Map<String, Any>) {} // 空实现
+              fun setDefaultsAsync(resourceId: Int) {} // 空实现
+              fun fetchAndActivate(): Boolean = true // 空实现，返回true
               fun activate(): Boolean = true
               val all: Map<String, Any> = emptyMap()
           }
@@ -142,7 +142,7 @@ jobs:
               get() = FirebaseRemoteConfig.getInstance()
           EOF
 
-          # 3. FirebaseCrashlytics 类 + 扩展属性
+          # 3. FirebaseCrashlytics 类 + 扩展属性（空实现，无崩溃上报）
           cat > "app/src/main/java/com/google/firebase/crashlytics/FirebaseCrashlytics.kt" << 'EOF'
           package com.google.firebase.crashlytics
           import com.google.firebase.Firebase
@@ -151,7 +151,7 @@ jobs:
               companion object {
                   fun getInstance(): FirebaseCrashlytics = FirebaseCrashlytics()
               }
-              fun logException(e: Throwable) {}
+              fun logException(e: Throwable) {} // 空实现，无上报
               fun log(msg: String) {}
               fun setUserId(id: String) {}
               fun setCustomKey(key: String, value: String) {}
@@ -165,7 +165,7 @@ jobs:
               get() = FirebaseCrashlytics.getInstance()
           EOF
 
-          # 4. FirebaseApp 和 Firebase 对象
+          # 4. FirebaseApp 和 Firebase 对象（兼容依赖注入）
           cat > "app/src/main/java/com/google/firebase/FirebaseApp.kt" << 'EOF'
           package com.google.firebase
           import android.content.Context
@@ -184,7 +184,7 @@ jobs:
           }
           EOF
           
-          echo "✅ Created zero-dependency Firebase stub classes"
+          echo "✅ Created zero-dependency Firebase stub classes (for compile compatibility only)"
 
       ##### 彻底移除所有 Firebase 和 Google 服务依赖 #####
       - name: Remove all Firebase and Google Services dependencies
@@ -197,20 +197,19 @@ jobs:
           sed -i '/platform(libs\.firebase\.bom)/d' "$APP_BUILD_FILE"
           sed -i '/implementation(libs\.firebase\.[^)]*)/d' "$APP_BUILD_FILE"
           
-          # 2. 关键修复：使用 grep -v 完全重建文件，移除所有 Firebase/Google 插件引用
-          # 处理 app/build.gradle.kts
+          # 2. 移除所有 Firebase/Google 插件引用
           grep -v "alias(libs.plugins.google.services)" "$APP_BUILD_FILE" > "$APP_BUILD_FILE.tmp"
           mv "$APP_BUILD_FILE.tmp" "$APP_BUILD_FILE"
           grep -v "alias(libs.plugins.firebase.crashlytics)" "$APP_BUILD_FILE" > "$APP_BUILD_FILE.tmp"
           mv "$APP_BUILD_FILE.tmp" "$APP_BUILD_FILE"
           
-          # 3. 关键修复：处理根目录 build.gradle.kts
+          # 3. 处理根目录 build.gradle.kts
           grep -v "alias(libs.plugins.google.services)" "$ROOT_BUILD_FILE" > "$ROOT_BUILD_FILE.tmp"
           mv "$ROOT_BUILD_FILE.tmp" "$ROOT_BUILD_FILE"
           grep -v "alias(libs.plugins.firebase.crashlytics)" "$ROOT_BUILD_FILE" > "$ROOT_BUILD_FILE.tmp"
           mv "$ROOT_BUILD_FILE.tmp" "$ROOT_BUILD_FILE"
           
-          # 4. 从 libs.versions.toml 中移除 Firebase 库定义
+          # 4. 从 libs.versions.toml 中移除 Firebase 相关定义
           grep -v 'firebase-bom = { group = "com.google.firebase"' "$TOML_FILE" > "$TOML_FILE.tmp"
           mv "$TOML_FILE.tmp" "$TOML_FILE"
           grep -v 'firebase-analytics = { group = "com.google.firebase"' "$TOML_FILE" > "$TOML_FILE.tmp"
@@ -219,14 +218,10 @@ jobs:
           mv "$TOML_FILE.tmp" "$TOML_FILE"
           grep -v 'firebase-config = { group = "com.google.firebase"' "$TOML_FILE" > "$TOML_FILE.tmp"
           mv "$TOML_FILE.tmp" "$TOML_FILE"
-          
-          # 5. 从 libs.versions.toml 中移除 plugins 部分的 Firebase 插件定义
-          grep -v 'google-services = { id = "com.google.gms.google-services"' "$TOML_FILE" > "$TOML_FILE.tmp"
+          grep -v 'google-services = { id = "com.google.gms.google.services"' "$TOML_FILE" > "$TOML_FILE.tmp"
           mv "$TOML_FILE.tmp" "$TOML_FILE"
           grep -v 'firebase-crashlytics = { id = "com.google.firebase.crashlytics"' "$TOML_FILE" > "$TOML_FILE.tmp"
           mv "$TOML_FILE.tmp" "$TOML_FILE"
-          
-          # 6. 移除 versions 部分的 firebase 版本号定义
           grep -v '^firebase-bom = "' "$TOML_FILE" > "$TOML_FILE.tmp"
           mv "$TOML_FILE.tmp" "$TOML_FILE"
           grep -v '^firebase-crashlytics = "' "$TOML_FILE" > "$TOML_FILE.tmp"
@@ -234,38 +229,29 @@ jobs:
           grep -v '^google-services = "' "$TOML_FILE" > "$TOML_FILE.tmp"
           mv "$TOML_FILE.tmp" "$TOML_FILE"
           
-          echo "✅ All Firebase dependencies and plugins removed from all files"
+          echo "✅ All Firebase dependencies and plugins removed"
 
-      ##### 清理代码中 FirebaseAnalytics 引用（彻底移除跟踪库） #####
-      - name: Remove FirebaseAnalytics references in code
+      ##### 清理 FirebaseAnalytics 跟踪相关引用（核心：移除跟踪功能） #####
+      - name: Remove FirebaseAnalytics tracking references
         run: |
-          # 1. 清理 ChatVM.kt 中的 analytics 注入和使用
+          # 1. 清理 ChatVM.kt 中的 analytics 注入和日志跟踪
           CHAT_VM_FILE="app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt"
           # 移除构造函数中的 analytics 参数
           sed -i 's/, private val analytics: FirebaseAnalytics,//' "$CHAT_VM_FILE"
-          # 移除 analytics.logEvent 调用（替换为空注释，不影响代码结构）
-          sed -i 's/analytics\.logEvent([^)]*)/\/\/ 移除 Firebase Analytics 日志统计/' "$CHAT_VM_FILE"
+          # 移除所有 analytics.logEvent 跟踪调用
+          sed -i '/analytics\.logEvent/d' "$CHAT_VM_FILE"
           
-          # 2. 清理 AppModule.kt 中的 FirebaseAnalytics 依赖注入
+          # 2. 清理 AppModule.kt 中的 FirebaseAnalytics 依赖注入（不再提供 Analytics 实例）
           APP_MODULE_FILE="app/src/main/java/me/rerere/rikkahub/di/AppModule.kt"
           sed -i '/single { Firebase.analytics }/d' "$APP_MODULE_FILE"
           
-          echo "✅ Cleaned all FirebaseAnalytics references in code and DI"
-
-      ##### 删除 Firebase Stub 类（无需再兼容） #####
-      - name: Delete Firebase stub classes
-        run: |
-          rm -rf "app/src/main/java/com/google/firebase"
-          echo "✅ Deleted Firebase stub classes (no longer needed)"
+          echo "✅ Cleaned all FirebaseAnalytics tracking references"
 
       ##### 添加 Guava 依赖 #####
       - name: Add Guava dependency
         run: |
           BUILD_FILE="app/build.gradle.kts"
-          
-          # 在 dependencies { 块中添加 Guava
           sed -i '/dependencies {/a \    implementation("com.google.guava:guava:33.3.1-android")' "$BUILD_FILE"
-          
           echo "✅ Added Guava dependency"
 
       ##### 改包名：lastchat.rikkafork.cocolal -> lastchat.ll3 #####
@@ -274,17 +260,14 @@ jobs:
           sed -i 's/applicationId = "lastchat.rikkafork.cocolal"/applicationId = "lastchat.ll3"/' app/build.gradle.kts
           echo "✅ Package: lastchat.ll3"
 
-      ##### 创建空的 google-services.json #####
+      ##### 创建空的 google-services.json（兼容构建） #####
       - name: Create placeholder google-services.json
         run: |
           FLAVOR="${{ steps.flavor.outputs.flavor }}"
           mkdir -p "app/src/$FLAVOR"
-          
-          # 最小化占位文件
           cat > "app/src/$FLAVOR/google-services.json" << 'EOF'
           {"project_info":{"project_number":"0","project_id":"dummy","storage_bucket":"dummy"},"client":[{"client_info":{"mobilesdk_app_id":"0","android_client_info":{"package_name":"dummy"}},"oauth_client":[],"api_key":[],"services":{}}],"configuration_version":"1"}
           EOF
-          
           echo "✅ Created placeholder google-services.json for $FLAVOR"
 
       - name: Prepare signing config
@@ -325,3 +308,4 @@ jobs:
             app/build/outputs/apk/${{ steps.flavor.outputs.flavor }}/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
