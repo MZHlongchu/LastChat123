@@ -57,6 +57,7 @@
     <string name="request_log_source_ocr">OCR</string>
     <string name="request_log_source_scheduled_message">Scheduled Message</string>
     <string name="request_log_source_spontaneous">Spontaneous</string>
+    <string name="request_log_source_model_name_generation">Model Name Generation</string>
     <string name="request_log_source_other">Other</string>
     <string name="app_name">LastChat Plus</string>
     <string name="assistant_importer_import_failed">Import Failed</string>
@@ -175,6 +176,8 @@
     <string name="assistant_page_local_tools_lorebooks_editor_desc">Allow assistant to create/update/delete entries in enabled lorebooks (undoable via history).</string>
     <string name="assistant_page_manage_memory">Manage Memory (%d)</string>
     <string name="assistant_page_manage_memory_title">Manage Memory</string>
+    <string name="assistant_page_recent_memories_title">Recent Memories</string>
+    <string name="assistant_page_view_all_memories">View All Memories</string>
     <string name="assistant_page_memory_pinned_badge">Pinned</string>
     <string name="assistant_page_max_tokens">Max Tokens</string>
     <string name="assistant_page_max_tokens_desc">Max generation tokens. Leave empty for no limit.</string>
@@ -723,6 +726,9 @@
     <string name="setting_model_page_title">Default Models</string>
     <string name="setting_model_page_title_model">Title Model</string>
     <string name="setting_model_page_title_model_desc">Model for summarizing chat titles. Recommend fast/cheap model.</string>
+    <string name="setting_model_page_model_name_generation_model">Model Name Generation Model</string>
+    <string name="setting_model_page_model_name_generation_model_desc">Model used to generate readable names from model IDs.</string>
+    <string name="setting_model_page_model_name_generation_prompt_vars">Vars: Model ID: {model_id}</string>
     <string name="setting_model_page_translate_model">Translate Model</string>
     <string name="setting_model_page_translate_model_desc">Model for translation features</string>
     <string name="setting_model_page_translate_prompt_vars">Vars: Source: {source_text}, Target Lang: {target_lang}</string>
@@ -1003,6 +1009,8 @@
     <string name="setting_provider_page_model_id">Model ID</string>
     <string name="setting_provider_page_model_id_placeholder">e.g. gpt-3.5-turbo</string>
     <string name="setting_provider_page_model_name">Model Name</string>
+    <string name="setting_provider_page_generate_model_name">Generate Model Name</string>
+    <string name="setting_provider_page_generate_model_name_failed">Failed to generate model name.</string>
     <string name="setting_provider_page_model_type">Model Type</string>
     <string name="setting_provider_page_models">Models</string>
     <string name="setting_provider_page_name">Name</string>
