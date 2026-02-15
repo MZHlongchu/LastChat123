@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.components.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -9,7 +8,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,8 +20,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import coil3.compose.AsyncImage
-import coil3.compose.AsyncImagePainter
-import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import coil3.svg.css
 import me.rerere.rikkahub.R
@@ -170,7 +166,13 @@ fun AutoAIIcon(
     padding: Dp = 4.dp,
 ) {
     val path = remember(name) { computeAIIconByName(name) } ?: run {
-        TextAvatar(text = name, modifier = modifier, loading = loading, color = color, contentColor = contentColor)
+        TextAvatar(
+            text = safeAvatarText(name),
+            modifier = modifier,
+            loading = loading,
+            color = color,
+            contentColor = contentColor
+        )
         return
     }
     AIIcon(
@@ -233,7 +235,7 @@ fun AutoProviderIcon(
         fallback = {
             // Priority 3: Text avatar (final fallback)
             TextAvatar(
-                text = name,
+                text = safeAvatarText(name),
                 modifier = modifier,
                 loading = loading,
                 color = color,
@@ -274,7 +276,7 @@ private fun ProviderFaviconFallback(
             padding = padding,
             fallback = {
                 TextAvatar(
-                    text = name,
+                    text = safeAvatarText(name),
                     modifier = modifier,
                     loading = loading,
                     color = color,
@@ -284,7 +286,7 @@ private fun ProviderFaviconFallback(
         )
     } else {
         TextAvatar(
-            text = name,
+            text = safeAvatarText(name),
             modifier = modifier,
             loading = loading,
             color = color,
@@ -322,6 +324,11 @@ private fun getProviderSlugFromName(name: String): String? {
         lowerName.contains("cerebras") -> "cerebras"
         lowerName.contains("cloudflare") -> "cloudflare"
         lowerName.contains("hunyuan") || lowerName.contains("tencent") -> "hunyuan"
+        lowerName.contains("meituan") || lowerName.contains("美团") || lowerName.contains("longcat") -> "longcat"
+        lowerName.contains("xiaomi") || lowerName.contains("小米") || lowerName.contains("mimo") -> "xiaomimimo"
+        lowerName.contains("baai") -> "baai"
+        lowerName.contains("kwaipilot") -> "kwaipilot"
+        lowerName.contains("kolors") -> "kolors"
         else -> null
     }
 }
@@ -368,44 +375,47 @@ fun AutoAIIconWithUrl(
     
     // Priority 0: User-selected custom icon (highest priority)
     if (!customIconUri.isNullOrBlank()) {
-        // Generate URL for LobeHub icons (theme-adaptive)
-        val iconUrl = remember(customIconUri, darkMode) {
+        // Keep manual picker behavior and prefer colored LobeHub icons when possible.
+        val customIconUrls = remember(customIconUri, darkMode) {
             when {
                 customIconUri.startsWith("lobehub:") -> {
                     // New format: lobehub:slug
                     val slug = customIconUri.removePrefix("lobehub:")
-                    val theme = if (darkMode) "dark" else "light"
-                    "https://registry.npmmirror.com/@lobehub/icons-static-png/latest/files/$theme/$slug.png"
+                    getLobeHubIconUrls(slug, darkMode)
                 }
                 customIconUri.contains("@lobehub/icons-static-png") ||
                 (customIconUri.contains("lobehub") && customIconUri.contains("/icons/")) -> {
-                    // Legacy format: full LobeHub URL - extract slug and make theme-adaptive
+                    // Legacy format: full LobeHub URL - extract slug and prefer color variant.
                     val slugMatch = Regex("""/(?:dark|light)/([^/]+)\.png""").find(customIconUri)
-                    val slug = slugMatch?.groupValues?.get(1)
+                    val slug = slugMatch?.groupValues?.get(1)?.removeSuffix("-color")
                     if (slug != null) {
-                        val theme = if (darkMode) "dark" else "light"
-                        "https://registry.npmmirror.com/@lobehub/icons-static-png/latest/files/$theme/$slug.png"
+                        getLobeHubIconUrls(slug, darkMode)
                     } else {
-                        customIconUri
+                        IconUrlPair(customIconUri, null)
                     }
                 }
-                else -> customIconUri
+                else -> IconUrlPair(customIconUri, null)
             }
         }
-        
-        // Use AsyncImage directly for consistent behavior with ClickableIconPicker
-        Surface(
+
+        RemoteIcon(
+            url = customIconUrls.coloredUrl,
+            fallbackUrl = customIconUrls.monochromeUrl,
+            name = name,
             modifier = modifier,
-            shape = rememberAvatarShape(loading),
-            color = Color.Transparent,
-        ) {
-            AsyncImage(
-                model = iconUrl,
-                contentDescription = name,
-                modifier = Modifier.padding(padding),
-                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-            )
-        }
+            loading = loading,
+            color = color,
+            padding = padding,
+            fallback = {
+                TextAvatar(
+                    text = safeAvatarText(name),
+                    modifier = Modifier,
+                    loading = loading,
+                    color = color,
+                    contentColor = contentColor
+                )
+            }
+        )
         return
     }
     
@@ -505,7 +515,7 @@ fun AutoAIIconWithUrl(
         else -> {
             // For models: fallback directly to text avatar (no favicon fetching)
             TextAvatar(
-                text = name,
+                text = safeAvatarText(name),
                 modifier = modifier,
                 loading = loading,
                 color = color,
@@ -514,6 +524,8 @@ fun AutoAIIconWithUrl(
         }
     }
 }
+
+private fun safeAvatarText(name: String): String = name.trim().ifBlank { "?" }
 
 /**
  * Check if a model name has a good local icon available
@@ -542,30 +554,42 @@ private fun hasGoodLocalIcon(name: String): Boolean {
            lowerName.contains("nvidia") ||
            lowerName.contains("cerebras") ||
            lowerName.contains("openrouter") ||
-           lowerName.contains("antigravity")
+           lowerName.contains("antigravity") ||
+           lowerName.contains("meituan") ||
+           lowerName.contains("美团") ||
+           lowerName.contains("longcat") ||
+           lowerName.contains("xiaomi") ||
+           lowerName.contains("小米") ||
+           lowerName.contains("mimo") ||
+           lowerName.contains("baai") ||
+           lowerName.contains("kwaipilot") ||
+           lowerName.contains("kolors") ||
+           lowerName.contains("hunyuan") ||
+           lowerName.contains("混元")
 }
 
 /**
- * Icon URL pair containing both colored and monochrome versions
+ * Icon URL pair for preferred icon URL and optional fallback URL.
  */
 private data class IconUrlPair(
     val coloredUrl: String,
-    val monochromeUrl: String
+    val monochromeUrl: String?
 )
 
 /**
  * Get LobeHub CDN icon URLs from provider slug
- * Returns primary theme-appropriate URL and fallback to opposite theme
+ * Returns primary colored URL and fallback monochrome URL in current theme.
  * 
  * LobeHub structure:
- * - /dark/{slug}.png - dark icons (for dark backgrounds)
- * - /light/{slug}.png - light icons (for light backgrounds)
+ * - /dark/{slug}-color.png | /light/{slug}-color.png  (preferred)
+ * - /dark/{slug}.png       | /light/{slug}.png        (fallback)
  */
 private fun getLobeHubIconUrls(providerSlug: String, darkMode: Boolean): IconUrlPair {
     // Normalize the slug: lowercase and replace spaces/underscores with hyphens
     val normalizedSlug = providerSlug.lowercase()
         .replace(" ", "-")
         .replace("_", "-")
+        .removeSuffix("-color")
     
     // Map some common provider slugs to their LobeHub equivalents
     val slug = when (normalizedSlug.replace("-", "")) {
@@ -579,12 +603,11 @@ private fun getLobeHubIconUrls(providerSlug: String, darkMode: Boolean): IconUrl
     // For dark mode: use dark icons (light colored icons visible on dark bg)
     // For light mode: use light icons (dark colored icons visible on light bg)
     val primaryTheme = if (darkMode) "dark" else "light"
-    val fallbackTheme = if (darkMode) "light" else "dark"
-    
-    // npmmirror CDN with correct path format
+ 
+    // npmmirror CDN with color-first strategy.
     return IconUrlPair(
-        coloredUrl = "https://registry.npmmirror.com/@lobehub/icons-static-png/latest/files/$primaryTheme/$slug.png",
-        monochromeUrl = "https://registry.npmmirror.com/@lobehub/icons-static-png/latest/files/$fallbackTheme/$slug.png"
+        coloredUrl = "https://registry.npmmirror.com/@lobehub/icons-static-png/latest/files/$primaryTheme/$slug-color.png",
+        monochromeUrl = "https://registry.npmmirror.com/@lobehub/icons-static-png/latest/files/$primaryTheme/$slug.png"
     )
 }
 
@@ -623,6 +646,8 @@ private fun RemoteIcon(
         else -> null
     }
 
+    var loaded by remember(currentUrl) { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier
             .sizeIn(minWidth = 24.dp, minHeight = 24.dp)
@@ -634,12 +659,16 @@ private fun RemoteIcon(
             fallback?.invoke()
             return@Surface
         }
-
-        val painter = rememberAsyncImagePainter(model = currentUrl)
-        val state = painter.state
-
-        LaunchedEffect(currentUrl, state) {
-            if (state is AsyncImagePainter.State.Error) {
+        
+        AsyncImage(
+            model = currentUrl,
+            contentDescription = name,
+            modifier = Modifier.padding(padding),
+            contentScale = ContentScale.Fit,
+            onSuccess = { loaded = true },
+            onLoading = { loaded = false },
+            onError = {
+                loaded = false
                 when (currentUrl) {
                     url -> {
                         primaryFailed = true
@@ -651,24 +680,11 @@ private fun RemoteIcon(
                     }
                 }
             }
-        }
-
-        when (state) {
-            is AsyncImagePainter.State.Success -> {
-                Image(
-                    painter = painter,
-                    contentDescription = name,
-                    modifier = Modifier.padding(padding),
-                    contentScale = ContentScale.Fit
-                )
-            }
-            is AsyncImagePainter.State.Loading,
-            is AsyncImagePainter.State.Error,
-            is AsyncImagePainter.State.Empty -> {
-                // Show the final fallback (typically TextAvatar) immediately while loading.
-                // If loading succeeds, we'll swap to the icon; if it fails, fallback stays.
-                fallback?.invoke()
-            }
+        )
+        
+        if (!loaded) {
+            // Show fallback while loading and on error, so icon area is never blank.
+            fallback?.invoke()
         }
     }
 }
@@ -723,6 +739,12 @@ private fun matchProviderPattern(providerName: String): String? {
     return when {
         // Custom providers
         providerName.contains("antigravity") -> "antigravity.png"
+        providerName.contains("meituan") || providerName.contains("美团") || providerName.contains("longcat") -> "longcat-color.svg"
+        providerName.contains("xiaomi") || providerName.contains("小米") || providerName.contains("mimo") -> "xiaomimimo.svg"
+        providerName.contains("baai") -> "baai.svg"
+        providerName.contains("kwaipilot") -> "kwaipilot-color.svg"
+        providerName.contains("kolors") -> "kolors-color.svg"
+        providerName.contains("hunyuan") || providerName.contains("混元") || providerName.contains("tencent") -> "hunyuan-color.svg"
         
         // Companies with their own icons
         providerName == "openai" -> "openai.svg"
@@ -773,6 +795,11 @@ private fun matchProviderPattern(providerName: String): String? {
 private fun matchModelPattern(modelName: String): String? {
     return when {
         // Specific model patterns - order matters (more specific first)
+        PATTERN_LONGCAT_MODEL.containsMatchIn(modelName) -> "longcat-color.svg"
+        PATTERN_XIAOMI_MIMO.containsMatchIn(modelName) -> "xiaomimimo.svg"
+        PATTERN_BAAI.containsMatchIn(modelName) -> "baai.svg"
+        PATTERN_KWAIPILOT.containsMatchIn(modelName) -> "kwaipilot-color.svg"
+        PATTERN_KOLORS.containsMatchIn(modelName) -> "kolors-color.svg"
         PATTERN_CLAUDE_MODEL.containsMatchIn(modelName) -> "claude-color.svg"
         PATTERN_GPT_MODEL.containsMatchIn(modelName) -> "openai.svg"
         PATTERN_GEMINI_MODEL.containsMatchIn(modelName) -> "gemini-color.svg"
@@ -823,6 +850,11 @@ private fun matchModelPattern(modelName: String): String? {
 // Also provide legacy matching for non-OpenRouter usage (backwards compat)
 private fun matchIconPattern(searchName: String): String? {
     return when {
+        PATTERN_LONGCAT.containsMatchIn(searchName) -> "longcat-color.svg"
+        PATTERN_XIAOMI_MIMO.containsMatchIn(searchName) -> "xiaomimimo.svg"
+        PATTERN_BAAI.containsMatchIn(searchName) -> "baai.svg"
+        PATTERN_KWAIPILOT.containsMatchIn(searchName) -> "kwaipilot-color.svg"
+        PATTERN_KOLORS.containsMatchIn(searchName) -> "kolors-color.svg"
         PATTERN_OPENAI.containsMatchIn(searchName) -> "openai.svg"
         PATTERN_GEMINI.containsMatchIn(searchName) -> "gemini-color.svg"
         PATTERN_GOOGLE.containsMatchIn(searchName) -> "google-color.svg"
@@ -879,6 +911,11 @@ private fun matchIconPattern(searchName: String): String? {
 private val ICON_CACHE = mutableMapOf<String, String>()
 private val REMOTE_ICON_FAILURE_CACHE =
     java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+private val PATTERN_LONGCAT = Regex("longcat|meituan|美团")
+private val PATTERN_XIAOMI_MIMO = Regex("xiaomi|小米|mimo")
+private val PATTERN_BAAI = Regex("baai")
+private val PATTERN_KWAIPILOT = Regex("kwaipilot")
+private val PATTERN_KOLORS = Regex("kolors")
 private val PATTERN_OPENAI = Regex("(gpt|openai|o\\d)")
 private val PATTERN_GEMINI = Regex("(gemini)")
 private val PATTERN_GOOGLE = Regex("google")
@@ -891,7 +928,7 @@ private val PATTERN_OPENROUTER = Regex("openrouter")
 private val PATTERN_ZHIPU = Regex("zhipu|智谱|glm")
 private val PATTERN_MISTRAL = Regex("mistral")
 private val PATTERN_META = Regex("meta\\b|(?<!o)llama")
-private val PATTERN_HUNYUAN = Regex("hunyuan|tencent")
+private val PATTERN_HUNYUAN = Regex("hunyuan|混元|tencent")
 private val PATTERN_GEMMA = Regex("gemma")
 private val PATTERN_PERPLEXITY = Regex("perplexity")
 private val PATTERN_BYTEDANCE = Regex("bytedance|火山")
@@ -936,6 +973,7 @@ private val PATTERN_PHI = Regex("\\bphi\\b|phi-")
 private val PATTERN_COMMAND = Regex("command-")
 private val PATTERN_CLAUDE_MODEL = Regex("claude")
 private val PATTERN_GPT_MODEL = Regex("gpt(?:\\b|\\d|[-_])|\\bo\\d")
+private val PATTERN_LONGCAT_MODEL = Regex("longcat")
 private val PATTERN_DEEPSEEK_MODEL = Regex("deepseek")
 private val PATTERN_GEMINI_MODEL = Regex("gemini")
 private val PATTERN_GROK_MODEL = Regex("grok")
