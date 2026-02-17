@@ -226,6 +226,23 @@ private fun SharedTransitionScope.ChatListNormal(
             defaultName = defaultAssistantName,
         ).orEmpty()
     }
+    val effectiveDisplay = settings.getEffectiveDisplaySetting()
+    val compressionMarkerIndexes = remember(
+        conversation.contextSummaryBoundaries,
+        conversation.messageNodes,
+    ) {
+        conversation.contextSummaryBoundaries
+            .asSequence()
+            .filter { it in conversation.messageNodes.indices }
+            .toSet()
+    }
+    val pendingCompressionMarkerIndex = remember(
+        conversation.contextSummaryPendingBoundaryIndex,
+        conversation.messageNodes,
+    ) {
+        conversation.contextSummaryPendingBoundaryIndex
+            .takeIf { it in conversation.messageNodes.indices }
+    }
 
     val currentConversationState = rememberUpdatedState(conversation)
     val onCitationClick = remember {
@@ -415,19 +432,19 @@ private fun SharedTransitionScope.ChatListNormal(
                         )
                     }
                     if (index == conversation.truncateIndex - 1) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .padding(vertical = 8.dp)
-                                .fillMaxWidth()
-                        ) {
-                            HorizontalDivider(modifier = Modifier.weight(1f))
-                            Text(
-                                text = stringResource(R.string.chat_page_clear_context),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            HorizontalDivider(modifier = Modifier.weight(1f))
+                        ContextDivider(label = stringResource(R.string.chat_page_clear_context))
+                    }
+                    if (
+                        effectiveDisplay.showContextCompressionDivider &&
+                        index != conversation.truncateIndex - 1
+                    ) {
+                        when {
+                            index == pendingCompressionMarkerIndex -> {
+                                ContextDivider(label = stringResource(R.string.chat_page_context_compressing))
+                            }
+                            index in compressionMarkerIndexes -> {
+                                ContextDivider(label = stringResource(R.string.chat_page_context_compressed))
+                            }
                         }
                     }
                 }
@@ -534,7 +551,6 @@ private fun SharedTransitionScope.ChatListNormal(
             )
 
             val captureProgress = LocalScrollCaptureInProgress.current
-            val effectiveDisplay = settings.getEffectiveDisplaySetting()
 
             // 消息快速跳转
             MessageJumper(
@@ -544,6 +560,24 @@ private fun SharedTransitionScope.ChatListNormal(
                 state = state
             )
         }
+    }
+}
+
+@Composable
+private fun ContextDivider(label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .padding(vertical = 8.dp)
+            .fillMaxWidth()
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f))
     }
 }
 
