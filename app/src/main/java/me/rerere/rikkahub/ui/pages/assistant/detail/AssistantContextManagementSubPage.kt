@@ -5,39 +5,43 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Book
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.ui.HapticSwitch
@@ -50,7 +54,8 @@ import kotlin.math.roundToInt
 fun AssistantContextManagementSubPage(
     assistant: Assistant,
     onUpdate: (Assistant) -> Unit,
-    onNavigateToLorebooks: () -> Unit
+    onNavigateToLorebooks: () -> Unit,
+    onNavigateToModels: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -80,50 +85,18 @@ fun AssistantContextManagementSubPage(
         // MESSAGE HISTORY
         // ═══════════════════════════════════════════════════════════════════
         SettingsGroup(title = stringResource(R.string.context_message_history_title)) {
-            // Max messages input
-            val maxMessages = assistant.maxHistoryMessages ?: 0
+            val needsSummarizerWarning =
+                assistant.enableContextRefresh &&
+                    assistant.contextSummarizerModelId == null &&
+                    assistant.summarizerModelId == null
+            AnimatedVisibility(
+                visible = needsSummarizerWarning,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                SummarizerWarningBanner(onClick = onNavigateToModels)
+            }
 
-            IntInputSettingCard(
-                title = stringResource(R.string.context_max_messages),
-                value = maxMessages,
-                valueText = if (maxMessages == 0) {
-                    stringResource(R.string.context_max_messages_unlimited)
-                } else {
-                    stringResource(R.string.context_max_messages_value, maxMessages)
-                },
-                description = stringResource(R.string.context_max_messages_desc),
-                onCommitValue = { newValue ->
-                    onUpdate(
-                        assistant.copy(
-                            maxHistoryMessages = if (newValue == 0) null else newValue.coerceAtLeast(0)
-                        )
-                    )
-                }
-            )
-            
-            // Summarization toggle
-            SettingGroupItem(
-                title = stringResource(R.string.context_enable_summarization),
-                subtitle = stringResource(R.string.context_enable_summarization_desc),
-                trailing = {
-                    HapticSwitch(
-                        checked = assistant.enableHistorySummarization,
-                        onCheckedChange = { enabled ->
-                            onUpdate(assistant.copy(enableHistorySummarization = enabled))
-                        }
-                    )
-                },
-                onClick = {
-                    onUpdate(assistant.copy(enableHistorySummarization = !assistant.enableHistorySummarization))
-                }
-            )
-        }
-
-        // ═══════════════════════════════════════════════════════════════════
-        // MESSAGE SUMMARIZATION
-        // ═══════════════════════════════════════════════════════════════════
-        SettingsGroup(title = stringResource(R.string.context_refresh_title)) {
-            // Enable Context Refresh toggle
             SettingGroupItem(
                 title = stringResource(R.string.context_refresh_enable),
                 subtitle = stringResource(R.string.context_refresh_enable_desc),
@@ -131,45 +104,200 @@ fun AssistantContextManagementSubPage(
                     HapticSwitch(
                         checked = assistant.enableContextRefresh,
                         onCheckedChange = { enabled ->
-                            onUpdate(assistant.copy(enableContextRefresh = enabled))
+                            onUpdate(
+                                assistant.copy(
+                                    enableContextRefresh = enabled,
+                                    autoRegenerateSummary = if (!enabled) false else assistant.autoRegenerateSummary
+                                )
+                            )
                         }
                     )
                 },
                 onClick = {
-                    onUpdate(assistant.copy(enableContextRefresh = !assistant.enableContextRefresh))
+                    val enabled = !assistant.enableContextRefresh
+                    onUpdate(
+                        assistant.copy(
+                            enableContextRefresh = enabled,
+                            autoRegenerateSummary = if (!enabled) false else assistant.autoRegenerateSummary
+                        )
+                    )
                 }
             )
-            
-            // Auto-regenerate toggle (visible when context refresh is enabled)
+
             AnimatedVisibility(
                 visible = assistant.enableContextRefresh,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                val maxMsgs = assistant.maxHistoryMessages
-                val autoSummarizeDesc = if (maxMsgs != null) {
-                    stringResource(R.string.context_refresh_auto_summarize_desc, maxMsgs)
-                } else {
-                    stringResource(R.string.context_refresh_auto_summarize_desc_disabled)
-                }
+                val historyLimit = assistant.maxHistoryMessages ?: 10
                 SettingGroupItem(
                     title = stringResource(R.string.context_refresh_auto_summarize_title),
-                    subtitle = autoSummarizeDesc,
+                    subtitle = stringResource(R.string.context_refresh_auto_summarize_desc, historyLimit),
                     trailing = {
                         HapticSwitch(
                             checked = assistant.autoRegenerateSummary,
-                            enabled = maxMsgs != null,
                             onCheckedChange = { enabled ->
-                                onUpdate(assistant.copy(autoRegenerateSummary = enabled))
+                                onUpdate(
+                                    assistant.copy(
+                                        autoRegenerateSummary = enabled,
+                                        enableHistorySummarization = if (enabled) false else assistant.enableHistorySummarization,
+                                        maxHistoryMessages = if (enabled) (assistant.maxHistoryMessages ?: 10) else assistant.maxHistoryMessages
+                                    )
+                                )
                             }
                         )
                     },
                     onClick = {
-                        if (maxMsgs != null) {
-                            onUpdate(assistant.copy(autoRegenerateSummary = !assistant.autoRegenerateSummary))
-                        }
+                        val enabled = !assistant.autoRegenerateSummary
+                        onUpdate(
+                            assistant.copy(
+                                autoRegenerateSummary = enabled,
+                                enableHistorySummarization = if (enabled) false else assistant.enableHistorySummarization,
+                                maxHistoryMessages = if (enabled) (assistant.maxHistoryMessages ?: 10) else assistant.maxHistoryMessages
+                            )
+                        )
                     }
                 )
+            }
+
+            SettingGroupItem(
+                title = stringResource(R.string.context_dynamic_pruning_title),
+                subtitle = stringResource(R.string.context_dynamic_pruning_desc),
+                trailing = {
+                    HapticSwitch(
+                        checked = assistant.enableHistorySummarization,
+                        onCheckedChange = { enabled ->
+                            onUpdate(
+                                assistant.copy(
+                                    enableHistorySummarization = enabled,
+                                    autoRegenerateSummary = if (enabled) false else assistant.autoRegenerateSummary,
+                                    maxHistoryMessages = if (enabled) (assistant.maxHistoryMessages ?: 10) else assistant.maxHistoryMessages
+                                )
+                            )
+                        }
+                    )
+                },
+                onClick = {
+                    val enabled = !assistant.enableHistorySummarization
+                    onUpdate(
+                        assistant.copy(
+                            enableHistorySummarization = enabled,
+                            autoRegenerateSummary = if (enabled) false else assistant.autoRegenerateSummary,
+                            maxHistoryMessages = if (enabled) (assistant.maxHistoryMessages ?: 10) else assistant.maxHistoryMessages
+                        )
+                    )
+                }
+            )
+
+            AnimatedVisibility(
+                visible = assistant.enableHistorySummarization || (assistant.enableContextRefresh && assistant.autoRegenerateSummary),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                val historyLimit = (assistant.maxHistoryMessages ?: 10).coerceAtLeast(1)
+                var sliderValue by remember(historyLimit) { mutableFloatStateOf(historyLimit.coerceIn(5, 50).toFloat()) }
+                var showManualInputDialog by remember { mutableStateOf(false) }
+                var manualInputText by remember(historyLimit) { mutableStateOf(historyLimit.toString()) }
+                val sliderValueInt = sliderValue.roundToInt()
+
+                SliderSettingCard(
+                    title = if (assistant.enableHistorySummarization) {
+                        stringResource(R.string.context_dynamic_pruning_limit_title)
+                    } else {
+                        stringResource(R.string.context_max_messages)
+                    },
+                    value = sliderValue,
+                    valueText = stringResource(
+                        R.string.context_max_messages_value,
+                        historyLimit
+                    ),
+                    onValueTextClick = {
+                        manualInputText = historyLimit.toString()
+                        showManualInputDialog = true
+                    },
+                    description = stringResource(
+                        if (assistant.enableHistorySummarization) {
+                            R.string.context_dynamic_pruning_limit_desc
+                        } else {
+                            R.string.context_refresh_auto_summarize_desc
+                        },
+                        historyLimit
+                    ),
+                    onValueChange = { sliderValue = it },
+                    onValueChangeFinished = {
+                        val newValue = sliderValue.roundToInt().coerceAtLeast(5)
+                        onUpdate(
+                            assistant.copy(
+                                maxHistoryMessages = newValue
+                            )
+                        )
+                    },
+                    valueRange = 5f..50f,
+                    steps = 44
+                )
+
+                if (showManualInputDialog) {
+                    val parsedValue = manualInputText.toLongOrNull()
+                    val canConfirm = parsedValue != null && parsedValue in 1L..Int.MAX_VALUE.toLong()
+
+                    AlertDialog(
+                        onDismissRequest = { showManualInputDialog = false },
+                        title = {
+                            Text(
+                                text = if (assistant.enableHistorySummarization) {
+                                    stringResource(R.string.context_dynamic_pruning_limit_title)
+                                } else {
+                                    stringResource(R.string.context_max_messages)
+                                }
+                            )
+                        },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = manualInputText,
+                                    onValueChange = { input ->
+                                        manualInputText = input.filter { it.isDigit() }
+                                    },
+                                    label = { Text(stringResource(R.string.context_manual_limit_input_label)) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    isError = manualInputText.isNotEmpty() && !canConfirm
+                                )
+                                Text(
+                                    text = if (manualInputText.isNotEmpty() && !canConfirm) {
+                                        stringResource(R.string.context_manual_limit_input_error)
+                                    } else {
+                                        stringResource(R.string.context_manual_limit_input_hint)
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (manualInputText.isNotEmpty() && !canConfirm) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    val manualValue = manualInputText.toLongOrNull() ?: return@Button
+                                    if (manualValue !in 1L..Int.MAX_VALUE.toLong()) return@Button
+                                    onUpdate(assistant.copy(maxHistoryMessages = manualValue.toInt()))
+                                    showManualInputDialog = false
+                                },
+                                enabled = canConfirm
+                            ) {
+                                Text(stringResource(android.R.string.ok))
+                            }
+                        },
+                        dismissButton = {
+                            OutlinedButton(onClick = { showManualInputDialog = false }) {
+                                Text(stringResource(android.R.string.cancel))
+                            }
+                        }
+                    )
+                }
             }
         }
 
@@ -206,10 +334,42 @@ fun AssistantContextManagementSubPage(
 }
 
 @Composable
+private fun SummarizerWarningBanner(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = stringResource(R.string.context_refresh_no_summarizer),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+}
+
+@Composable
 private fun SliderSettingCard(
     title: String,
     value: Float,
     valueText: String,
+    onValueTextClick: (() -> Unit)? = null,
     description: String,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
@@ -234,7 +394,12 @@ private fun SliderSettingCard(
                 Text(
                     text = valueText,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = if (onValueTextClick != null) {
+                        Modifier.clickable(onClick = onValueTextClick)
+                    } else {
+                        Modifier
+                    }
                 )
             }
             Slider(
@@ -243,88 +408,6 @@ private fun SliderSettingCard(
                 onValueChangeFinished = onValueChangeFinished,
                 valueRange = valueRange,
                 steps = steps
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun IntInputSettingCard(
-    title: String,
-    value: Int,
-    valueText: String,
-    description: String,
-    onCommitValue: (Int) -> Unit,
-) {
-    val focusManager = LocalFocusManager.current
-    var localText by remember(value) { mutableStateOf(value.toString()) }
-
-    fun commit() {
-        val trimmed = localText.trim()
-        if (trimmed.isEmpty()) {
-            localText = value.toString()
-            return
-        }
-
-        val parsed = trimmed.toLongOrNull()
-        val safeValue = when {
-            parsed == null -> Int.MAX_VALUE
-            parsed > Int.MAX_VALUE.toLong() -> Int.MAX_VALUE
-            else -> parsed.toInt()
-        }.coerceAtLeast(0)
-
-        if (safeValue != value) {
-            onCommitValue(safeValue)
-        }
-        localText = safeValue.toString()
-    }
-
-    Surface(
-        color = if (LocalDarkMode.current) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (valueText.isNotEmpty()) {
-                Text(
-                    text = valueText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            OutlinedTextField(
-                value = localText,
-                onValueChange = { newValue ->
-                    localText = newValue.filter { it in '0'..'9' }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { focusState ->
-                        if (!focusState.isFocused) {
-                            commit()
-                        }
-                    },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(
-                    onDone = { focusManager.clearFocus() },
-                ),
-                singleLine = true,
             )
             Text(
                 text = description,
