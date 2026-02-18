@@ -111,6 +111,7 @@ import me.rerere.rikkahub.data.model.GroupChatSeat
 import me.rerere.rikkahub.data.model.GroupChatSeatOverrides
 import me.rerere.rikkahub.data.model.GroupChatTemplate
 import me.rerere.rikkahub.data.model.Skill
+import me.rerere.rikkahub.data.model.ToolResultHistoryMode
 import me.rerere.rikkahub.data.model.buildSeatDisplayNames
 import me.rerere.rikkahub.data.model.id
 import me.rerere.rikkahub.data.model.toMessageNode
@@ -1309,6 +1310,7 @@ class ChatService(
                     conversationId = id.toString(),
                     assistantId = conversation.assistantId.toString(),
                     messages = baseMessages,
+                    enableRagIndexing = settings.displaySetting.toolResultHistoryMode == ToolResultHistoryMode.RAG,
                 )
             }
             val welcomePhraseForAppContext = pendingUiWelcomePhraseForAppContext[conversationId]
@@ -5197,6 +5199,11 @@ class ChatService(
             val job = appScope.launch {
                 kotlinx.coroutines.delay(4000)
                 context.deleteChatFiles(conversationFull.files)
+                settingsStore.update { current ->
+                    current.copy(
+                        conversationReadPositions = current.conversationReadPositions - conversation.id.toString()
+                    )
+                }
                 conversationDeletionJobs.remove(conversation.id)
                 recentlyDeletedConversations.remove(conversation.id)
             }
