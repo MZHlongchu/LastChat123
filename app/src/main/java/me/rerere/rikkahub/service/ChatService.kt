@@ -1377,21 +1377,12 @@ class ChatService(
 
             val model = settings.getCurrentChatModel() ?: return@runCatching
 
-            // Check if model supports tools when external tools are configured
             val assistant = settings.getCurrentAssistant()
-            val lorebooksEditorEnabled = assistant.localTools.contains(LocalToolOption.LorebooksEditor)
-            val hasEnabledLorebooksForAssistant = lorebooksEditorEnabled && settings.lorebooks.any { lorebook ->
-                lorebook.enabled && assistant.enabledLorebookIds.contains(lorebook.id)
-            }
-            val hasToolsConfigured =
-                (assistant.searchMode !is AssistantSearchMode.Off) ||
-                    assistant.localTools.isNotEmpty() ||
-                    assistant.enabledSkillIds.isNotEmpty() ||
-                    mcpManager.getAllAvailableTools().isNotEmpty() ||
-                    hasEnabledLorebooksForAssistant
-            if (hasToolsConfigured && !model.abilities.contains(ModelAbility.TOOL)) {
-                _errorFlow.emit(IllegalStateException(context.getString(R.string.tools_warning)))
-            }
+            val hasEnabledLorebooksForAssistant =
+                assistant.localTools.contains(LocalToolOption.LorebooksEditor) &&
+                    settings.lorebooks.any { lorebook ->
+                        lorebook.enabled && assistant.enabledLorebookIds.contains(lorebook.id)
+                    }
 
             // start generating
             generationHandler.generateText(
@@ -1977,9 +1968,6 @@ class ChatService(
             }
 
             val hasExternalTools = seatTools.isNotEmpty()
-            if (hasExternalTools && !seatModel.abilities.contains(ModelAbility.TOOL)) {
-                _errorFlow.emit(IllegalStateException(context.getString(R.string.tools_warning)))
-            }
             val seatMaxSteps = if (hasExternalTools || useBuiltInSearch) 256 else 1
             val seatMemories = if (seatAssistant.enableMemory && !temporaryConversations.contains(conversationId)) {
                 val assistantId = seatAssistant.id.toString()
@@ -4949,12 +4937,14 @@ class ChatService(
             val startAt = System.currentTimeMillis()
             var failure: Throwable? = null
             var titleText = ""
+            var rawResponseText = ""
             try {
                 val result = providerHandler.generateText(
                     providerSetting = provider,
                     messages = requestMessages,
                     params = params,
                 )
+                rawResponseText = result.rawResponse.orEmpty()
                 titleText = result.choices.firstOrNull()?.message?.toContentText()?.trim().orEmpty()
             } catch (t: Throwable) {
                 failure = t
@@ -4966,6 +4956,7 @@ class ChatService(
                     params = params,
                     requestMessages = requestMessages,
                     responseText = titleText,
+                    responseRawText = rawResponseText,
                     stream = false,
                     latencyMs = System.currentTimeMillis() - startAt,
                     durationMs = System.currentTimeMillis() - startAt,
@@ -5130,12 +5121,14 @@ class ChatService(
             val startAt = System.currentTimeMillis()
             var failure: Throwable? = null
             var rawSuggestions = ""
+            var rawResponseText = ""
             val suggestions = try {
                 val result = providerHandler.generateText(
                     providerSetting = provider,
                     messages = requestMessages,
                     params = params,
                 )
+                rawResponseText = result.rawResponse.orEmpty()
                 rawSuggestions = result.choices.firstOrNull()?.message?.toContentText().orEmpty()
                 rawSuggestions.split("\n")
                     .map { it.trim() }
@@ -5150,6 +5143,7 @@ class ChatService(
                     params = params,
                     requestMessages = requestMessages,
                     responseText = rawSuggestions,
+                    responseRawText = rawResponseText,
                     stream = false,
                     latencyMs = System.currentTimeMillis() - startAt,
                     durationMs = System.currentTimeMillis() - startAt,
@@ -5474,12 +5468,14 @@ class ChatService(
             val startAt = System.currentTimeMillis()
             var failure: Throwable? = null
             var summary = ""
+            var rawResponseText = ""
             try {
                 val response = providerHandler.generateText(
                     providerSetting = provider,
                     messages = requestMessages,
                     params = params
                 )
+                rawResponseText = response.rawResponse.orEmpty()
                 summary = response.choices.firstOrNull()?.message?.toContentText().orEmpty()
             } catch (t: Throwable) {
                 failure = t
@@ -5491,6 +5487,7 @@ class ChatService(
                     params = params,
                     requestMessages = requestMessages,
                     responseText = summary,
+                    responseRawText = rawResponseText,
                     stream = false,
                     latencyMs = System.currentTimeMillis() - startAt,
                     durationMs = System.currentTimeMillis() - startAt,
