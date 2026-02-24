@@ -193,6 +193,9 @@ class SettingsStore(
         // WebDAV
         val WEBDAV_CONFIG = stringPreferencesKey("webdav_config")
 
+        // Object Storage (S3 Compatible)
+        val OBJECT_STORAGE_CONFIG = stringPreferencesKey("object_storage_config")
+
         // TTS
         val TTS_PROVIDERS = stringPreferencesKey("tts_providers")
         val SELECTED_TTS_PROVIDER = stringPreferencesKey("selected_tts_provider")
@@ -432,6 +435,9 @@ class SettingsStore(
                 webDavConfig = preferences[WEBDAV_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: WebDavConfig(),
+                objectStorageConfig = preferences[OBJECT_STORAGE_CONFIG]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: ObjectStorageConfig(),
                 ttsProviders = preferences[TTS_PROVIDERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -669,6 +675,7 @@ class SettingsStore(
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(finalSettingsToSave.mcpServers)
             preferences[MCP_TOOL_CALL_TIMEOUT_SECONDS] = finalSettingsToSave.mcpToolCallTimeoutSeconds.coerceAtLeast(1)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(finalSettingsToSave.webDavConfig)
+            preferences[OBJECT_STORAGE_CONFIG] = JsonInstant.encodeToString(finalSettingsToSave.objectStorageConfig)
             preferences[TTS_PROVIDERS] = JsonInstant.encodeToString(finalSettingsToSave.ttsProviders)
             finalSettingsToSave.selectedTTSProviderId?.let {
                 preferences[SELECTED_TTS_PROVIDER] = it.toString()
@@ -777,6 +784,7 @@ data class Settings(
     val mcpToolCallTimeoutSeconds: Int = 60,
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
+    val objectStorageConfig: ObjectStorageConfig = ObjectStorageConfig(),
     val ttsProviders: List<TTSProviderSetting> = DEFAULT_TTS_PROVIDERS,
     val selectedTTSProviderId: Uuid = DEFAULT_SYSTEM_TTS_ID,
     val consolidationWorkerIntervalMinutes: Int = 15,
@@ -1050,6 +1058,7 @@ data class DisplaySetting(
     val embeddingRetrievalTimeoutSeconds: Int = 2, // Timeout for embedding-based retrieval (memories, tool results)
     val useLastTurnMemoryOnSkip: Boolean = true, // Reuse last injected memories when retrieval is skipped
     val useJsonEditorForCustomRequest: Boolean = false, // Use JSON editor for custom headers/body in assistant/model advanced settings
+    val showExportConversationJsonButton: Boolean = false, // Show export raw JSON action in conversation long-press menu
 )
 
 fun DisplaySetting.coerceForConflicts(): DisplaySetting {
@@ -1072,6 +1081,11 @@ data class WebDavConfig(
     val username: String = "",
     val password: String = "",
     val path: String = "lastchat_backups",
+    // Auto backup (starts only when app is foreground)
+    val autoEnabled: Boolean = false,
+    val autoIntervalDays: Int = 7,
+    val autoMaxCount: Int = 7,
+    val lastAutoSuccessAt: Long? = null,
     val items: List<BackupItem> = listOf(
         BackupItem.DATABASE,
         BackupItem.FILES
@@ -1083,6 +1097,24 @@ data class WebDavConfig(
         FILES,
     }
 }
+
+@Serializable
+data class ObjectStorageConfig(
+    val endpoint: String = "",
+    val accessKeyId: String = "",
+    val secretAccessKey: String = "",
+    val bucket: String = "",
+    val region: String = "",
+    // Auto backup (starts only when app is foreground)
+    val autoEnabled: Boolean = false,
+    val autoIntervalDays: Int = 7,
+    val autoMaxCount: Int = 7,
+    val lastAutoSuccessAt: Long? = null,
+    val items: List<WebDavConfig.BackupItem> = listOf(
+        WebDavConfig.BackupItem.DATABASE,
+        WebDavConfig.BackupItem.FILES
+    ),
+)
 
 fun Settings.isNotConfigured() = providers.all { it.models.isEmpty() }
 

@@ -15,9 +15,13 @@ local.properties
 .cursor
 .history
 .kotlin
+app/version.properties
 build_log.txt
 build_output.txt
 buildlog.txt
 /helloagents
 /artifacts
 settings.local.json
+/upstream
+/web
+/web-ui

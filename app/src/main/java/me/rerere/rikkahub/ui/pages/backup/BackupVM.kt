@@ -15,9 +15,13 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.data.backup.BackupCoordinator
+import me.rerere.rikkahub.data.backup.BackupLogManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.sync.WebDavBackupItem
+import me.rerere.rikkahub.data.sync.ObjectStorageBackupItem
+import me.rerere.rikkahub.data.sync.ObjectStorageSync
 import me.rerere.rikkahub.data.sync.WebdavSync
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.UiState
@@ -28,6 +32,9 @@ private const val TAG = "BackupVM"
 class BackupVM(
     private val settingsStore: SettingsStore,
     private val webdavSync: WebdavSync,
+    private val objectStorageSync: ObjectStorageSync,
+    private val backupCoordinator: BackupCoordinator,
+    private val backupLogManager: BackupLogManager,
 ) : ViewModel() {
     val settings = settingsStore.settingsFlow.stateIn(
         scope = viewModelScope,
@@ -36,6 +43,12 @@ class BackupVM(
     )
 
     val webDavBackupItems = MutableStateFlow<UiState<List<WebDavBackupItem>>>(UiState.Idle)
+    val objectStorageBackupItems = MutableStateFlow<UiState<List<ObjectStorageBackupItem>>>(UiState.Idle)
+    val backupLogs = backupLogManager.observeRecent().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = emptyList()
+    )
 
     init {
         loadBackupFileItems()
@@ -64,28 +77,67 @@ class BackupVM(
         }
     }
 
+    fun loadObjectStorageBackupFileItems() {
+        viewModelScope.launch {
+            runCatching {
+                objectStorageBackupItems.emit(UiState.Loading)
+                objectStorageBackupItems.emit(
+                    value = UiState.Success(
+                        data = objectStorageSync.listBackupFiles(
+                            config = settings.value.objectStorageConfig
+                        ).sortedByDescending { it.lastModified }
+                    )
+                )
+            }.onFailure {
+                objectStorageBackupItems.emit(UiState.Error(it))
+            }
+        }
+    }
+
     suspend fun testWebDav() {
         webdavSync.testWebdav(settings.value.webDavConfig)
     }
 
+    suspend fun testObjectStorage() {
+        objectStorageSync.testConnection(settings.value.objectStorageConfig)
+    }
+
     suspend fun backup() {
-        webdavSync.backupToWebDav(settings.value.webDavConfig)
+        backupCoordinator.manualBackupWebDav()
+    }
+
+    suspend fun backupToObjectStorage() {
+        backupCoordinator.manualBackupObjectStorage()
     }
 
     suspend fun restore(item: WebDavBackupItem): WebdavSync.RestoreResult {
-        return webdavSync.restoreFromWebDav(webDavConfig = settings.value.webDavConfig, item = item)
+        return backupCoordinator.restoreWebDav(item)
+    }
+
+    suspend fun restoreFromObjectStorage(item: ObjectStorageBackupItem): WebdavSync.RestoreResult {
+        return backupCoordinator.restoreObjectStorage(item)
     }
 
     suspend fun deleteWebDavBackupFile(item: WebDavBackupItem) {
         webdavSync.deleteWebDavBackupFile(settings.value.webDavConfig, item)
     }
 
+    suspend fun deleteObjectStorageBackupFile(item: ObjectStorageBackupItem) {
+        objectStorageSync.deleteBackupFile(settings.value.objectStorageConfig, item)
+    }
+
     suspend fun exportToFile(): File {
-        return webdavSync.prepareBackupFile(settings.value.webDavConfig.copy())
+        return backupCoordinator.exportToFile()
     }
 
     suspend fun restoreFromLocalFile(file: File): WebdavSync.RestoreResult {
-        return webdavSync.restoreFromLocalFile(file, settings.value.webDavConfig)
+        return backupCoordinator.restoreFromLocalFile(file)
+    }
+
+    fun clearBackupLogs() {
+        viewModelScope.launch {
+            backupLogManager.clearAll()
+        }
     }
     
     fun restartApp(context: android.content.Context) {

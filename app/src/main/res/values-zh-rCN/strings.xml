@@ -126,6 +126,10 @@
     <string name="chat_page_loading_older_messages">正在加载更早消息…</string>
     <string name="chat_page_context_compressing">正在压缩上下文</string>
     <string name="chat_page_context_compressed">已压缩上下文</string>
+    <string name="chat_page_export_conversation_json">导出 JSON</string>
+    <string name="chat_page_export_conversation_json_success">会话 JSON 已准备好分享</string>
+    <string name="chat_page_export_conversation_json_failed">导出会话 JSON 失败：%1$s</string>
+    <string name="chat_page_export_conversation_json_not_found">未找到该会话，可能已被删除</string>
 
     <string name="setting_display_page_embedding_retrieval_timeout_title">嵌入模型检索超时时间</string>
     <string name="setting_display_page_embedding_retrieval_timeout_desc">超时后将跳过该次检索，单位：秒</string>
@@ -136,6 +140,9 @@
     <string name="setting_advanced_page_custom_request_title">自定义请求</string>
     <string name="setting_advanced_page_custom_request_json_mode_title">原始JSON编辑框</string>
     <string name="setting_advanced_page_custom_request_json_mode_desc">使用单个文本框编辑JSON，以自定义 Headers 和 Body。</string>
+    <string name="setting_advanced_page_conversation_actions_title">会话操作</string>
+    <string name="setting_advanced_page_show_export_conversation_json_title">显示“导出会话为 JSON”按钮</string>
+    <string name="setting_advanced_page_show_export_conversation_json_desc">在会话长按菜单中显示“导出 JSON”。</string>
     <string name="setting_display_page_merge_providers_in_model_selector_title">模型选择合并同源提供商</string>
     <string name="setting_display_page_merge_providers_in_model_selector_desc">当多个提供商 Base URL 相同，在模型选择中合并显示</string>
     <string name="setting_page_advanced_settings">高级设置</string>
@@ -226,4 +233,32 @@
     <string name="request_log_source_model_name_generation">模型名称生成</string>
     <string name="developer_option_auto_continue_on_truncation_title">截断时自动续写一次</string>
     <string name="developer_option_auto_continue_on_truncation_desc">当生成因 token 上限截断（非手动取消）时，自动续写一次。</string>
+
+    <string name="backup_page_object_storage_backup">对象存储备份</string>
+    <string name="backup_page_object_storage_backup_files">对象存储备份文件列表</string>
+    <string name="backup_page_object_storage_endpoint">端点</string>
+    <string name="backup_page_object_storage_access_key_id">访问密钥ID</string>
+    <string name="backup_page_object_storage_secret_access_key">秘密访问密钥</string>
+    <string name="backup_page_object_storage_bucket">Bucket</string>
+    <string name="backup_page_object_storage_region">区域</string>
+    <string name="backup_page_auto_backup">自动备份(Beta)</string>
+    <string name="backup_page_auto_backup_desc">仅在应用处于前台且有网络时启动，请注意流量消耗</string>
+    <string name="backup_page_auto_interval_days">间隔（天）</string>
+    <string name="backup_page_auto_interval_days_desc">每 %d 天自动备份一次。</string>
+    <string name="backup_page_auto_max_count">自动备份保留数</string>
+    <string name="backup_page_auto_max_count_desc">最多保留 %d 份自动备份，超过会删除最旧的。</string>
+    <string name="backup_page_auto_max_count_desc_unlimited">不删除历史备份</string>
+    <string name="backup_page_auto_never">从未</string>
+    <string name="backup_page_auto_last_success">上次自动备份：%s</string>
+    <string name="backup_page_backup_logs">备份日志</string>
+    <string name="backup_page_backup_logs_clear">清空</string>
+    <string name="backup_page_backup_logs_cleared">已清空</string>
+    <string name="backup_page_backup_logs_empty">暂无备份日志。</string>
+    <string name="backup_log_trigger_auto">自动</string>
+    <string name="backup_log_trigger_manual">手动</string>
+    <string name="backup_log_backend_webdav">WebDAV</string>
+    <string name="backup_log_backend_object_storage">对象存储</string>
+    <string name="backup_log_status_success">成功</string>
+    <string name="backup_log_status_failed">失败</string>
+    <string name="backup_log_status_skipped">跳过</string>
 </resources>
