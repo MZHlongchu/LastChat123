@@ -399,6 +399,11 @@
     <string name="chat_page_clear_context">Clear Context</string>
     <string name="chat_page_context_compressing">Compressing context</string>
     <string name="chat_page_context_compressed">Context compressed</string>
+    <string name="chat_page_edit_context_summary">Edit compressed context summary</string>
+    <string name="chat_page_edit_context_summary_title">Edit compressed context summary</string>
+    <string name="chat_page_edit_context_summary_hint">Edit the summary content used for compressed context</string>
+    <string name="chat_page_edit_context_summary_empty">Summary cannot be empty</string>
+    <string name="chat_page_edit_context_summary_failed">Failed to save summary. Try again later.</string>
     <string name="chat_page_clear_context_confirm_title">Clear context?</string>
     <string name="chat_page_clear_context_confirm_message">This will remove previous messages from the current context. Continue?</string>
     <string name="chat_page_clear_context_confirm_action">Clear</string>
@@ -652,8 +657,8 @@
     <string name="setting_display_page_message_jumper_position_desc">Move jumper to left side</string>
     <string name="setting_display_page_show_model_name_desc">Show assistant name and time before messages</string>
     <string name="setting_display_page_show_model_name_title">Show Assistant Name</string>
-    <string name="setting_display_page_merge_providers_in_model_selector_title">Merge Providers in Model Selector</string>
-    <string name="setting_display_page_merge_providers_in_model_selector_desc">When providers share the same Base URL, merge them in model selection</string>
+    <string name="setting_display_page_merge_providers_in_model_selector_title">Merge Providers by First Tag</string>
+    <string name="setting_display_page_merge_providers_in_model_selector_desc">When providers share the same first tag, merge them in model selection</string>
     <string name="setting_display_page_show_token_usage_desc">Show token statistics below AI responses</string>
     <string name="setting_display_page_show_token_usage_title">Show Token Statistics</string>
     <string name="setting_display_page_message_input_style_title">Message Input Style</string>
@@ -794,9 +799,11 @@
     <string name="setting_page_assistant_desc">Configure your assistants</string>
     <string name="setting_page_basic_settings">Basic Settings</string>
     <string name="setting_page_built_in_tools">Built-in Tools</string>
-    <string name="setting_page_built_in_tools_desc">Select built-in tools supported by model. Currently only for Gemini official API.</string>
+    <string name="setting_page_built_in_tools_desc">Select built-in tools supported by this model.</string>
     <string name="setting_page_built_in_tools_search">Search</string>
     <string name="setting_page_built_in_tools_search_desc">Enable Google Search integration</string>
+    <string name="setting_page_built_in_tools_claude_search">Claude Web Search</string>
+    <string name="setting_page_built_in_tools_claude_search_desc">Enable Claude built-in web search</string>
     <string name="setting_page_built_in_tools_url_context">URL Context</string>
     <string name="setting_page_built_in_tools_url_context_desc">Enable URL content processing</string>
     <string name="setting_page_chat_settings">Chat Settings</string>
@@ -1195,6 +1202,10 @@
     <string name="theme_name_sakura">Sakura Pink</string>
     <string name="theme_name_spring">Meadow Green</string>
     <string name="conversation_load_failed">Could not load this chat (it may be too large). Delete it from the drawer or start a new chat.</string>
+    <string name="chat_large_context_warning_title">This chat is too large</string>
+    <string name="chat_large_context_warning_message">Current message count: %1$d. This may cause app crashes, freezes, or even loss of this chat data. Please start a new chat as soon as possible.</string>
+    <string name="chat_large_context_warning_confirm">Confirm</string>
+    <string name="chat_large_context_warning_confirm_countdown">Confirm (%1$d)</string>
     <string name="tools_warning">Tools are disabled for current model. Please enable tools in settings to use Skills/Local tools/Search/MCP.</string>
     <string name="translate">Translate</string>
     <string name="translating">Translating...</string>

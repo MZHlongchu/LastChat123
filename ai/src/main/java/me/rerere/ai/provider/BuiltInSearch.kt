@@ -1,21 +1,58 @@
 package me.rerere.ai.provider
 
 import me.rerere.ai.registry.ModelRegistry
+import java.net.URI
+import java.util.Locale
 
-fun Model.supportsBuiltInSearch(): Boolean {
-    if (tools.any { tool ->
-            tool == BuiltInTools.Search || tool == BuiltInTools.ClaudeWebSearch
-        }) {
+private val OFFICIAL_CLAUDE_API_HOSTS = setOf("api.anthropic.com")
+
+private fun ProviderSetting?.supportsClaudeBuiltInSearchByHost(): Boolean {
+    if (this !is ProviderSetting.Claude) return false
+    val host = baseUrl.extractHostFromBaseUrl() ?: return false
+    return host in OFFICIAL_CLAUDE_API_HOSTS || host.endsWith(".anthropic.com")
+}
+
+private fun String.extractHostFromBaseUrl(): String? {
+    val normalized = trim()
+    if (normalized.isBlank()) return null
+    return runCatching { URI(normalized).host?.lowercase(Locale.US) }.getOrNull()
+        ?: runCatching { URI("https://$normalized").host?.lowercase(Locale.US) }.getOrNull()
+}
+
+fun Model.supportsBuiltInSearch(providerSetting: ProviderSetting? = null): Boolean {
+    if (tools.contains(BuiltInTools.Search)) {
+        return true
+    }
+    if (tools.contains(BuiltInTools.ClaudeWebSearchDisabled)) {
+        return false
+    }
+    if (tools.contains(BuiltInTools.ClaudeWebSearch)) {
         return true
     }
 
-    return ModelRegistry.GEMINI_SERIES.match(modelId) || ModelRegistry.CLAUDE_SERIES.match(modelId)
+    return when {
+        ModelRegistry.GEMINI_SERIES.match(modelId) -> true
+        ModelRegistry.CLAUDE_SERIES.match(modelId) -> providerSetting.supportsClaudeBuiltInSearchByHost()
+        else -> false
+    }
+}
+
+fun Model.isClaudeBuiltInSearchEnabled(providerSetting: ProviderSetting? = null): Boolean {
+    if (tools.contains(BuiltInTools.ClaudeWebSearchDisabled)) {
+        return false
+    }
+    if (tools.contains(BuiltInTools.ClaudeWebSearch)) {
+        return true
+    }
+    return ModelRegistry.CLAUDE_SERIES.match(modelId) &&
+        providerSetting.supportsClaudeBuiltInSearchByHost()
 }
 
 fun Model.preferredBuiltInSearchTool(): BuiltInTools? {
     return when {
-        tools.contains(BuiltInTools.ClaudeWebSearch) -> BuiltInTools.ClaudeWebSearch
         tools.contains(BuiltInTools.Search) -> BuiltInTools.Search
+        tools.contains(BuiltInTools.ClaudeWebSearchDisabled) -> null
+        tools.contains(BuiltInTools.ClaudeWebSearch) -> BuiltInTools.ClaudeWebSearch
         ModelRegistry.CLAUDE_SERIES.match(modelId) -> BuiltInTools.ClaudeWebSearch
         ModelRegistry.GEMINI_SERIES.match(modelId) -> BuiltInTools.Search
         else -> null

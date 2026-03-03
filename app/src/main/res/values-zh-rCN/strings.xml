@@ -143,8 +143,8 @@
     <string name="setting_advanced_page_conversation_actions_title">会话操作</string>
     <string name="setting_advanced_page_show_export_conversation_json_title">显示“导出会话为 JSON”按钮</string>
     <string name="setting_advanced_page_show_export_conversation_json_desc">在会话长按菜单中显示“导出 JSON”。</string>
-    <string name="setting_display_page_merge_providers_in_model_selector_title">模型选择合并同源提供商</string>
-    <string name="setting_display_page_merge_providers_in_model_selector_desc">当多个提供商 Base URL 相同，在模型选择中合并显示</string>
+    <string name="setting_display_page_merge_providers_in_model_selector_title">模型选择按首个标签合并提供商</string>
+    <string name="setting_display_page_merge_providers_in_model_selector_desc">当多个提供商的第一个标签相同，在模型选择中合并显示</string>
     <string name="setting_page_advanced_settings">高级设置</string>
     <string name="setting_page_advanced_settings_desc">更多控制选项</string>
     <string name="setting_page_timeout_settings">超时设定</string>
@@ -223,6 +223,10 @@
     <string name="permission_read_external_storage_desc">允许读取图片与视频，用于在消息中显示本地媒体内容</string>
     <string name="group_chat_template_seat_system_prompt_restore">还原</string>
     <string name="conversation_load_failed">无法加载该对话（可能过长）。请在侧边栏删除，或新建对话继续。</string>
+    <string name="chat_large_context_warning_title">此对话数据过大</string>
+    <string name="chat_large_context_warning_message">当前消息数：%1$d。这可能导致应用崩溃或卡顿，甚至丢失本次对话数据。请尽快新建对话以继续聊天。</string>
+    <string name="chat_large_context_warning_confirm">确定</string>
+    <string name="chat_large_context_warning_confirm_countdown">确定（%1$d）</string>
 
     <string name="setting_model_page_model_name_generation_model">模型名称生成模型</string>
     <string name="setting_model_page_model_name_generation_model_desc">用于根据模型 ID 生成可读模型名称的模型</string>
@@ -261,4 +265,7 @@
     <string name="backup_log_status_success">成功</string>
     <string name="backup_log_status_failed">失败</string>
     <string name="backup_log_status_skipped">跳过</string>
+    <string name="setting_page_built_in_tools_desc">选择当前模型支持的内置工具，这些工具由 API 原生提供。</string>
+    <string name="setting_page_built_in_tools_claude_search">Claude 网页搜索</string>
+    <string name="setting_page_built_in_tools_claude_search_desc">启用 Claude 内置网页搜索</string>
 </resources>

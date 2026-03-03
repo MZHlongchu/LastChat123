@@ -1429,7 +1429,8 @@ class ChatService(
             val model = settings.getCurrentChatModel() ?: return@runCatching
 
             val assistant = settings.getCurrentAssistant()
-            val modelSupportsBuiltIn = model.supportsBuiltInSearch()
+            val modelProvider = model.findProvider(settings.providers)
+            val modelSupportsBuiltIn = model.supportsBuiltInSearch(modelProvider)
             val useBuiltInSearch = assistant.preferBuiltInSearch && modelSupportsBuiltIn
             val runtimeModel = if (useBuiltInSearch) {
                 model.ensureBuiltInSearchTool()
@@ -1963,10 +1964,11 @@ class ChatService(
                 }
             }
             val seatAssistant = applySeatOverrides(assistant, seat.overrides, fullSystemPromptSuffix)
-            val modelSupportsBuiltIn = model.supportsBuiltInSearch()
+            val seatProvider = model.findProvider(settings.providers)
+            val modelSupportsBuiltIn = model.supportsBuiltInSearch(seatProvider)
             val useBuiltInSearch = modelSupportsBuiltIn &&
                 (seatAssistant.searchMode is AssistantSearchMode.BuiltIn || seatAssistant.preferBuiltInSearch)
-            val seatModel = if (useBuiltInSearch) model.ensureBuiltInSearchTool() else model.copy(tools = emptySet())
+            val seatModel = if (useBuiltInSearch) model.ensureBuiltInSearchTool() else model.withoutBuiltInSearchTools()
 
             val seatInputTransformers = buildList {
                 if (includeAppContextTransformer) {
@@ -5634,6 +5636,30 @@ class ChatService(
                 clearContextSummaryPendingDividerIfMatch(conversationId, markerIndex)
             }
             contextSummaryInProgressConversations.remove(conversationId)
+        }
+    }
+
+    suspend fun updateContextSummary(conversationId: Uuid, summary: String): Boolean = withContext(Dispatchers.IO) {
+        val updatedSummary = summary.trim()
+        if (updatedSummary.isBlank()) return@withContext false
+        if (contextSummaryInProgressConversations.contains(conversationId)) return@withContext false
+
+        return@withContext try {
+            val currentConversation = getConversationFlow(conversationId).value
+            if (currentConversation.contextSummary.isNullOrBlank()) {
+                false
+            } else if (currentConversation.contextSummary?.trim() == updatedSummary) {
+                true
+            } else {
+                saveConversation(
+                    conversationId = conversationId,
+                    conversation = currentConversation.copy(contextSummary = updatedSummary)
+                )
+                true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "updateContextSummary failed", e)
+            false
         }
     }
 

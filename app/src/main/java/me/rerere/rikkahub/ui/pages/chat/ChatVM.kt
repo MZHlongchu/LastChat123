@@ -39,6 +39,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getConversationReadPosition
+import me.rerere.rikkahub.data.datastore.sanitizeConversationLargeContextWarningShownAt
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.Avatar
@@ -655,6 +656,25 @@ class ChatVM(
         }
     }
 
+    fun markLargeContextWarningShown(conversationId: Uuid = _conversationId) {
+        val conversationKey = conversationId.toString()
+        viewModelScope.launch {
+            settingsStore.update { current ->
+                if (current.conversationLargeContextWarningShownAt.containsKey(conversationKey)) {
+                    current
+                } else {
+                    current.copy(
+                        conversationLargeContextWarningShownAt = sanitizeConversationLargeContextWarningShownAt(
+                            current.conversationLargeContextWarningShownAt + (
+                                conversationKey to System.currentTimeMillis()
+                            )
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     fun setConversationAssistant(assistantId: Uuid) {
         chatService.setConversationAssistant(_conversationId, assistantId)
     }
@@ -719,6 +739,10 @@ class ChatVM(
     // Context Refresh - summarize conversation and update context
     suspend fun refreshContext(): ChatService.ContextRefreshResult {
         return chatService.summarizeAndRefresh(_conversationId)
+    }
+
+    suspend fun updateContextSummary(summary: String): Boolean {
+        return chatService.updateContextSummary(_conversationId, summary)
     }
 
     private fun getDateLabel(date: LocalDate): String {

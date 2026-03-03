@@ -277,6 +277,11 @@
   <string name="chat_page_clear_context">清空上下文</string>
   <string name="chat_page_context_compressing">正在压缩上下文</string>
   <string name="chat_page_context_compressed">已压缩上下文</string>
+  <string name="chat_page_edit_context_summary">编辑已压缩上下文摘要</string>
+  <string name="chat_page_edit_context_summary_title">编辑已压缩上下文摘要</string>
+  <string name="chat_page_edit_context_summary_hint">修改用于压缩上下文的摘要内容</string>
+  <string name="chat_page_edit_context_summary_empty">摘要内容不能为空</string>
+  <string name="chat_page_edit_context_summary_failed">摘要保存失败，请稍后重试</string>
   <string name="chat_page_clear_context_confirm_title">确认清空上下文？</string>
   <string name="chat_page_clear_context_confirm_message">这会从当前上下文中移除之前的消息，是否继续？</string>
   <string name="chat_page_clear_context_confirm_action">清空</string>
@@ -522,8 +527,8 @@
   <string name="setting_display_page_message_jumper_position_desc">将消息导航移到左侧</string>
   <string name="setting_display_page_show_model_name_desc">在消息前显示助手名称和时间</string>
   <string name="setting_display_page_show_model_name_title">显示助手名称</string>
-  <string name="setting_display_page_merge_providers_in_model_selector_title">模型选择合并同源提供商</string>
-  <string name="setting_display_page_merge_providers_in_model_selector_desc">当多个提供商 Base URL 相同，在模型选择中合并显示</string>
+  <string name="setting_display_page_merge_providers_in_model_selector_title">模型选择按首个标签合并提供商</string>
+  <string name="setting_display_page_merge_providers_in_model_selector_desc">当多个提供商的第一个标签相同，在模型选择中合并显示</string>
   <string name="setting_display_page_show_token_usage_desc">显示token用量和消息数量</string>
   <string name="setting_display_page_show_token_usage_title">显示Token和上下文统计</string>
   <string name="setting_display_page_message_input_style_title">消息输入栏样式</string>
@@ -661,9 +666,11 @@
   <string name="setting_page_assistant_desc">设置个性化助手 (智能体)</string>
   <string name="setting_page_basic_settings">基本设置</string>
   <string name="setting_page_built_in_tools">内置工具</string>
-  <string name="setting_page_built_in_tools_desc">选择模型支持的内置工具, 这些工具直接由API内置，无需APP提供，当前这个功能仅支持Gemini官方API。</string>
+  <string name="setting_page_built_in_tools_desc">选择当前模型支持的内置工具，这些工具由 API 原生提供。</string>
   <string name="setting_page_built_in_tools_search">搜索</string>
   <string name="setting_page_built_in_tools_search_desc">启用 Google 搜索集成</string>
+  <string name="setting_page_built_in_tools_claude_search">Claude 网页搜索</string>
+  <string name="setting_page_built_in_tools_claude_search_desc">启用 Claude 内置网页搜索</string>
   <string name="setting_page_built_in_tools_url_context">URL 上下文</string>
   <string name="setting_page_built_in_tools_url_context_desc">启用 URL 内容处理</string>
   <string name="setting_page_chat_settings">聊天设置</string>

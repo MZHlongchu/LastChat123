@@ -105,11 +105,13 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getConversationReadPosition
+import me.rerere.rikkahub.data.datastore.hasLargeContextWarningShown
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.GroupChatTemplate
 import me.rerere.rikkahub.data.model.buildSeatDisplayNames
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ChatInputUiMode
+import me.rerere.rikkahub.ui.components.ai.LargeContextWarningDialog
 import me.rerere.rikkahub.ui.components.ai.MinimalChatInput
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -573,11 +575,27 @@ private fun ChatPageContent(
     var isTemporaryChat by rememberSaveable { mutableStateOf(false) }
     var mentionDisambiguationState by remember { mutableStateOf<GroupChatMentionDisambiguationState?>(null) }
     var pendingJumpNodeId by remember { mutableStateOf<Uuid?>(null) }
+    var showLargeContextWarningDialog by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var showContextSummaryEditDialog by rememberSaveable(conversation.id) { mutableStateOf(false) }
+    var contextSummaryDraft by rememberSaveable(conversation.id) { mutableStateOf("") }
+    var savingContextSummary by remember { mutableStateOf(false) }
     val currentConversationState = rememberUpdatedState(conversation)
     val conversationInitialized by vm.conversationInitialized.collectAsStateWithLifecycle()
     val conversationReadPosition by vm.conversationReadPosition.collectAsStateWithLifecycle()
     val loadingOlderHistory by vm.loadingOlderHistory.collectAsStateWithLifecycle()
     var initialEntryHandled by rememberSaveable(conversation.id, initialSearchQuery) { mutableStateOf(false) }
+    val conversationMessageCount = remember(conversation.totalMessageNodeCount, conversation.messageNodes.size) {
+        LargeContextWarningPolicy.resolveMessageCount(conversation)
+    }
+    val latestAssistantPromptTokens = remember(conversation.messageNodes) {
+        LargeContextWarningPolicy.findLatestAssistantPromptTokens(conversation)
+    }
+    val hasShownLargeContextWarning = remember(
+        conversation.id,
+        setting.conversationLargeContextWarningShownAt,
+    ) {
+        setting.hasLargeContextWarningShown(conversation.id)
+    }
 
     // Visibility mask: hide list until scroll position is restored to prevent flash
     // Skip masking when we have a cached or persisted scroll position (list starts at ~correct spot)
@@ -661,6 +679,27 @@ private fun ChatPageContent(
             vm.updateConversationReadPosition(sample.first, sample.second, chatListState.firstVisibleItemIndex)
             pendingReadPositionSample = null
         }
+    }
+
+    LaunchedEffect(
+        conversation.id,
+        conversationInitialized,
+        conversationMessageCount,
+        latestAssistantPromptTokens,
+        hasShownLargeContextWarning,
+    ) {
+        if (!conversationInitialized) return@LaunchedEffect
+        if (showLargeContextWarningDialog) return@LaunchedEffect
+
+        val shouldShowWarning = LargeContextWarningPolicy.shouldShowWarning(
+            messageCount = conversationMessageCount,
+            latestAssistantPromptTokens = latestAssistantPromptTokens,
+            hasBeenShown = hasShownLargeContextWarning,
+        )
+        if (!shouldShowWarning) return@LaunchedEffect
+
+        showLargeContextWarningDialog = true
+        vm.markLargeContextWarningShown(conversation.id)
     }
 
     LaunchedEffect(
@@ -931,6 +970,12 @@ private fun ChatPageContent(
                     onReadPositionSample = { nodeId, offset ->
                         if (initialEntryHandled) {
                             pendingReadPositionSample = nodeId to offset
+                        }
+                    },
+                    onEditContextSummary = {
+                        if (!conversation.contextSummary.isNullOrBlank()) {
+                            contextSummaryDraft = conversation.contextSummary.orEmpty()
+                            showContextSummaryEditDialog = true
                         }
                     },
                 )
@@ -1441,6 +1486,47 @@ private fun ChatPageContent(
                         onDismiss = { mentionDisambiguationState = null },
                     )
                 }
+
+                if (showContextSummaryEditDialog) {
+                    ContextSummaryEditSheet(
+                        settings = setting,
+                        summary = contextSummaryDraft,
+                        saving = savingContextSummary,
+                        onSummaryChange = { contextSummaryDraft = it },
+                        onSave = {
+                            val updatedSummary = contextSummaryDraft.trim()
+                            if (updatedSummary.isEmpty()) {
+                                toaster.show(
+                                    message = context.getString(R.string.chat_page_edit_context_summary_empty),
+                                    type = ToastType.Warning,
+                                )
+                                return@ContextSummaryEditSheet
+                            }
+                            savingContextSummary = true
+                            scope.launch {
+                                val updated = vm.updateContextSummary(updatedSummary)
+                                savingContextSummary = false
+                                if (updated) {
+                                    showContextSummaryEditDialog = false
+                                } else {
+                                    toaster.show(
+                                        message = context.getString(R.string.chat_page_edit_context_summary_failed),
+                                        type = ToastType.Error,
+                                    )
+                                }
+                            }
+                        },
+                        onDismiss = { showContextSummaryEditDialog = false },
+                    )
+                }
+
+                if (showLargeContextWarningDialog) {
+                    LargeContextWarningDialog(
+                        messageCount = conversationMessageCount,
+                        enableHaptics = setting.displaySetting.enableUIHaptics,
+                        onConfirm = { showLargeContextWarningDialog = false },
+                    )
+                }
             }
         }
     }
@@ -1707,6 +1793,79 @@ private fun GroupChatMentionDisambiguationSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(text = stringResource(R.string.send))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextSummaryEditSheet(
+    settings: Settings,
+    summary: String,
+    saving: Boolean,
+    onSummaryChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val haptics = rememberPremiumHaptics(enabled = settings.displaySetting.enableUIHaptics)
+
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (!saving) onDismiss()
+        },
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.82f)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.chat_page_edit_context_summary_title),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                text = stringResource(R.string.chat_page_edit_context_summary_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = summary,
+                onValueChange = onSummaryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                minLines = 10,
+                maxLines = Int.MAX_VALUE,
+                enabled = !saving,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TextButton(
+                    onClick = {
+                        haptics.perform(HapticPattern.Pop)
+                        onDismiss()
+                    },
+                    enabled = !saving,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Button(
+                    onClick = {
+                        haptics.perform(HapticPattern.Pop)
+                        onSave()
+                    },
+                    enabled = !saving,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.save))
+                }
             }
         }
     }

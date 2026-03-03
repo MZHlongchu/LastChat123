@@ -297,6 +297,11 @@
   <string name="chat_page_clear_context">清空上下文</string>
   <string name="chat_page_context_compressing">正在壓縮上下文</string>
   <string name="chat_page_context_compressed">已壓縮上下文</string>
+  <string name="chat_page_edit_context_summary">編輯已壓縮上下文摘要</string>
+  <string name="chat_page_edit_context_summary_title">編輯已壓縮上下文摘要</string>
+  <string name="chat_page_edit_context_summary_hint">修改用於壓縮上下文的摘要內容</string>
+  <string name="chat_page_edit_context_summary_empty">摘要內容不能為空</string>
+  <string name="chat_page_edit_context_summary_failed">摘要保存失敗，請稍後重試</string>
   <string name="chat_page_clear_context_confirm_title">確認清空上下文？</string>
   <string name="chat_page_clear_context_confirm_message">這會從目前上下文中移除先前的訊息，是否繼續？</string>
   <string name="chat_page_clear_context_confirm_action">清空</string>
@@ -518,8 +523,8 @@
   <string name="setting_display_page_show_message_jumper_title">消息導航按鈕</string>
   <string name="setting_display_page_show_model_name_desc">在消息前顯示助手名稱和時間</string>
   <string name="setting_display_page_show_model_name_title">顯示助手名稱</string>
-  <string name="setting_display_page_merge_providers_in_model_selector_title">模型選擇合併同源供應商</string>
-  <string name="setting_display_page_merge_providers_in_model_selector_desc">當多個供應商 Base URL 相同，在模型選擇中合併顯示</string>
+  <string name="setting_display_page_merge_providers_in_model_selector_title">模型選擇按第一個標籤合併供應商</string>
+  <string name="setting_display_page_merge_providers_in_model_selector_desc">當多個供應商的第一個標籤相同，在模型選擇中合併顯示</string>
   <string name="setting_display_page_show_token_usage_desc">顯示token用量和消息數量</string>
   <string name="setting_display_page_show_token_usage_title">顯示Token和上下文統計</string>
   <string name="setting_display_page_message_input_style_title">消息輸入欄樣式</string>
@@ -591,9 +596,11 @@
   <string name="setting_page_assistant_desc">設定個性化助手 (智能體)</string>
   <string name="setting_page_basic_settings">基本設定</string>
   <string name="setting_page_built_in_tools">內置工具</string>
-  <string name="setting_page_built_in_tools_desc">選擇模型支援的內置工具，這些工具直接由API內置，無需APP提供，目前此功能僅支援Gemini官方API。</string>
+  <string name="setting_page_built_in_tools_desc">選擇目前模型支援的內建工具，這些工具由 API 原生提供。</string>
   <string name="setting_page_built_in_tools_search">搜尋</string>
   <string name="setting_page_built_in_tools_search_desc">啟用 Google 搜尋整合</string>
+  <string name="setting_page_built_in_tools_claude_search">Claude 網頁搜尋</string>
+  <string name="setting_page_built_in_tools_claude_search_desc">啟用 Claude 內建網頁搜尋</string>
   <string name="setting_page_built_in_tools_url_context">URL 上下文</string>
   <string name="setting_page_built_in_tools_url_context_desc">啟用 URL 內容處理</string>
   <string name="setting_page_chat_settings">聊天設定</string>
@@ -971,6 +978,10 @@
   <string name="theme_name_sakura">櫻花粉</string>
   <string name="theme_name_spring">原野綠</string>
   <string name="conversation_load_failed">無法載入該對話（可能過長）。請在側邊欄刪除，或新建對話繼續。</string>
+  <string name="chat_large_context_warning_title">此對話資料過大</string>
+  <string name="chat_large_context_warning_message">目前訊息數：%1$d。這可能導致應用當機或卡頓，甚至遺失本次對話資料。請盡快新建對話以繼續聊天。</string>
+  <string name="chat_large_context_warning_confirm">確定</string>
+  <string name="chat_large_context_warning_confirm_countdown">確定（%1$d）</string>
   <string name="tools_warning">當前模型未開啟工具調用，請在設定內啟用模型的工具能力，再使用技能/本地工具/搜尋/MCP等功能</string>
   <string name="translate">翻譯</string>
   <string name="translating">翻譯中...</string>
