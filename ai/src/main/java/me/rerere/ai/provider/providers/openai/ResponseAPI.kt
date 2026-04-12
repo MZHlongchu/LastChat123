@@ -20,6 +20,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
@@ -271,20 +272,32 @@ class ResponseAPI(private val client: OkHttpClient) : OpenAIImpl {
             }
 
             // tools
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
+            val hasGrokWebSearch = params.model.tools.contains(BuiltInTools.GrokWebSearch)
+            val hasGrokXSearch = params.model.tools.contains(BuiltInTools.GrokXSearch)
+            val hasFunctionTools = params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
+
+            if (hasFunctionTools || hasGrokWebSearch || hasGrokXSearch) {
                 putJsonArray("tools") {
-                    params.tools.forEach { tool ->
-                        add(buildJsonObject {
-                            put("type", "function")
-                            put("name", tool.name)
-                            put("description", tool.description)
-                            put(
-                                "parameters",
-                                json.encodeToJsonElement(
-                                    tool.parameters()
+                    if (hasGrokWebSearch) {
+                        add(buildJsonObject { put("type", "web_search") })
+                    }
+                    if (hasGrokXSearch) {
+                        add(buildJsonObject { put("type", "x_search") })
+                    }
+                    if (hasFunctionTools) {
+                        params.tools.forEach { tool ->
+                            add(buildJsonObject {
+                                put("type", "function")
+                                put("name", tool.name)
+                                put("description", tool.description)
+                                put(
+                                    "parameters",
+                                    json.encodeToJsonElement(
+                                        tool.parameters()
+                                    )
                                 )
-                            )
-                        })
+                            })
+                        }
                     }
                 }
             }
@@ -349,6 +362,27 @@ class ResponseAPI(private val client: OkHttpClient) : OpenAIImpl {
                                                 put(
                                                     "text",
                                                     "Error: Failed to encode image to base64"
+                                                )
+                                            }
+                                        })
+                                    }
+
+                                    is UIMessagePart.Audio -> {
+                                        add(buildJsonObject {
+                                            part.encodeBase64(withPrefix = false).onSuccess {
+                                                put("type", "input_audio")
+                                                put("input_audio", buildJsonObject {
+                                                    put("data", it)
+                                                    put("format", "mp3")
+                                                })
+                                            }.onFailure {
+                                                it.printStackTrace()
+                                                println("encode audio failed: ${part.url}")
+
+                                                put("type", "input_text")
+                                                put(
+                                                    "text",
+                                                    "Error: Failed to encode audio to base64"
                                                 )
                                             }
                                         })
@@ -684,7 +718,7 @@ private fun isModelAllowTemperature(model: Model): Boolean {
 }
 
 private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
-    val gonnaSend = filter { it is UIMessagePart.Text || it is UIMessagePart.Image }.size
+    val gonnaSend = filter { it is UIMessagePart.Text || it is UIMessagePart.Image || it is UIMessagePart.Audio || it is UIMessagePart.Video }.size
     val texts = filter { it is UIMessagePart.Text }.size
     return gonnaSend == texts && texts == 1
 }

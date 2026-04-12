@@ -160,6 +160,44 @@ fun AssistantToolsSubPage(
                 }
             )
              
+            // Scheduled Task Manager
+            SettingGroupItem(
+                title = stringResource(R.string.assistant_page_local_tools_scheduled_task_manager_title),
+                subtitle = stringResource(R.string.assistant_page_local_tools_scheduled_task_manager_desc),
+                trailing = {
+                    HapticSwitch(
+                        checked = assistant.localTools.contains(LocalToolOption.ScheduledTaskManager),
+                        onCheckedChange = { enabled ->
+                            val newLocalTools = if (enabled) {
+                                assistant.localTools + LocalToolOption.ScheduledTaskManager
+                            } else {
+                                assistant.localTools - LocalToolOption.ScheduledTaskManager
+                            }
+                            onUpdate(assistant.copy(localTools = newLocalTools))
+                        }
+                    )
+                }
+            )
+
+            // Ask User
+            SettingGroupItem(
+                title = stringResource(R.string.assistant_page_local_tools_ask_user_title),
+                subtitle = stringResource(R.string.assistant_page_local_tools_ask_user_desc),
+                trailing = {
+                    HapticSwitch(
+                        checked = assistant.localTools.contains(LocalToolOption.AskUser),
+                        onCheckedChange = { enabled ->
+                            val newLocalTools = if (enabled) {
+                                assistant.localTools + LocalToolOption.AskUser
+                            } else {
+                                assistant.localTools - LocalToolOption.AskUser
+                            }
+                            onUpdate(assistant.copy(localTools = newLocalTools))
+                        }
+                    )
+                }
+            )
+
             // Device Control
             SettingGroupItem(
                 title = stringResource(R.string.assistant_page_local_tools_device_control_title),

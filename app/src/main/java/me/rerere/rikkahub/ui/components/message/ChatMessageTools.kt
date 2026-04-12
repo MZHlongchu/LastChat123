@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,6 +43,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -56,8 +60,11 @@ import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import kotlinx.coroutines.launch
@@ -68,6 +75,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.ai.ui.AskUserState
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.highlight.HighlightText
 import me.rerere.rikkahub.R
@@ -915,4 +923,372 @@ internal fun ToolCallPreviewSheet(
             }
         },
     )
+}
+
+@Composable
+fun AskUserItem(
+    conversationId: Uuid?,
+    askUser: me.rerere.ai.ui.UIMessagePart.AskUser,
+) {
+    val chatService = koinInject<ChatService>()
+    val settings = me.rerere.rikkahub.ui.context.LocalSettings.current
+    val haptics = rememberPremiumHaptics(enabled = settings.displaySetting.enableUIHaptics)
+    var showSheet by remember(askUser.toolCallId) { mutableStateOf(false) }
+    val canRespond = conversationId != null && askUser.toolCallId.isNotBlank() && askUser.state == AskUserState.Pending
+    val multiQuestions = askUser.questions
+    val isMultiQuestion = multiQuestions != null && multiQuestions.size > 1
+
+    Card(
+        modifier = Modifier.animateContentSize(),
+        shape = AppShapes.CardLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.HelpOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = if (isMultiQuestion) {
+                            stringResource(R.string.ask_user_multi_title, multiQuestions!!.size)
+                        } else {
+                            stringResource(R.string.ask_user_title)
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (isMultiQuestion) {
+                            multiQuestions!!.first().question
+                        } else {
+                            askUser.question
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            when (askUser.state) {
+                AskUserState.Pending -> {
+                    TextButton(
+                        onClick = {
+                            haptics.perform(HapticPattern.Pop)
+                            showSheet = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = AppShapes.ButtonPill,
+                    ) {
+                        Text(text = stringResource(R.string.ask_user_respond))
+                    }
+                }
+
+                AskUserState.Answered -> {
+                    val multiAnswers = askUser.answers
+                    if (isMultiQuestion && multiQuestions != null && multiAnswers != null) {
+                        multiQuestions.zip(multiAnswers).forEach { (q, a) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = "${q.question}: $a",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                text = askUser.answer ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+
+                AskUserState.Dismissed -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.ask_user_dismissed),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showSheet && canRespond) {
+        if (isMultiQuestion && multiQuestions != null) {
+            AskUserWizardBottomSheet(
+                questions = multiQuestions,
+                onComplete = { combinedAnswers: String ->
+                    showSheet = false
+                    haptics.perform(HapticPattern.Success)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserWizardBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = combinedAnswers,
+                    )
+                },
+                onDismissRequest = {
+                    showSheet = false
+                    haptics.perform(HapticPattern.Pop)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserWizardBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = "",
+                    )
+                },
+            )
+        } else {
+            AskUserBottomSheet(
+                question = askUser.question,
+                options = askUser.options,
+                onSelect = { answer ->
+                    showSheet = false
+                    haptics.perform(HapticPattern.Pop)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = answer,
+                    )
+                },
+                onDismissRequest = {
+                    showSheet = false
+                    haptics.perform(HapticPattern.Pop)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = "",
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+internal fun AskUserBottomSheet(
+    question: String,
+    options: List<String>,
+    onSelect: (String) -> Unit,
+    onDismissRequest: () -> Unit,
+) {
+    val settings = me.rerere.rikkahub.ui.context.LocalSettings.current
+    val haptics = rememberPremiumHaptics(enabled = settings.displaySetting.enableUIHaptics)
+    var customInput by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    fun selectWithAnimation(answer: String) {
+        coroutineScope.launch {
+            sheetState.hide()
+            onSelect(answer)
+        }
+    }
+
+    // In a ModalBottomSheet the sheet surface is surfaceContainerLow in dark mode,
+    // so items must sit at a higher elevation to be visible.
+    val itemColor = MaterialTheme.colorScheme.surfaceContainerHigh
+
+    ModalBottomSheet(
+        sheetState = sheetState,
+        onDismissRequest = onDismissRequest,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            // Question (plain text, no card wrapper, larger font)
+            Text(
+                text = question,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+            )
+
+            // Options + input as a settings-style grouped list
+            Column(
+                modifier = Modifier.clip(RoundedCornerShape(24.dp)),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                options.forEach { option ->
+                    val optionInteraction = remember { MutableInteractionSource() }
+                    val optionPressed by optionInteraction.collectIsPressedAsState()
+                    val optionScale by animateFloatAsState(
+                        targetValue = if (optionPressed) 0.98f else 1f,
+                        animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f),
+                        label = "ask_user_option_scale",
+                    )
+                    Surface(
+                        onClick = {
+                            haptics.perform(HapticPattern.Pop)
+                            selectWithAnimation(option)
+                        },
+                        interactionSource = optionInteraction,
+                        color = itemColor,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { scaleX = optionScale; scaleY = optionScale },
+                    ) {
+                        Text(
+                            text = option,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                        )
+                    }
+                }
+
+                // Custom input row (matches SettingGroupItem visual style)
+                val submitInteractionSource = remember { MutableInteractionSource() }
+                val submitPressed by submitInteractionSource.collectIsPressedAsState()
+                val submitScale by animateFloatAsState(
+                    targetValue = if (submitPressed) 0.85f else 1f,
+                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
+                    label = "ask_user_submit_scale",
+                )
+                val canSubmit = customInput.isNotBlank()
+                Surface(
+                    color = itemColor,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        BasicTextField(
+                            value = customInput,
+                            onValueChange = { customInput = it },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(vertical = 10.dp),
+                            textStyle = MaterialTheme.typography.titleMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            singleLine = true,
+                            decorationBox = { innerTextField ->
+                                if (customInput.isEmpty()) {
+                                    Text(
+                                        text = stringResource(R.string.ask_user_type_hint),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                innerTextField()
+                            },
+                        )
+                        Surface(
+                            onClick = {
+                                if (canSubmit) {
+                                    haptics.perform(HapticPattern.Pop)
+                                    selectWithAnimation(customInput.trim())
+                                }
+                            },
+                            enabled = canSubmit,
+                            interactionSource = submitInteractionSource,
+                            color = if (canSubmit) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest
+                            },
+                            contentColor = if (canSubmit) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .graphicsLayer {
+                                    scaleX = submitScale
+                                    scaleY = submitScale
+                                },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Send,
+                                contentDescription = stringResource(R.string.ask_user_submit),
+                                modifier = Modifier
+                                    .padding(9.dp)
+                                    .size(22.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    }
 }

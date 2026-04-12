@@ -134,6 +134,9 @@ class ChatVM(
 
     // 用户设置
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
+    val settingsReady: StateFlow<Boolean> = settingsStore.settingsFlowRaw
+        .map { true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val conversationReadPosition: StateFlow<ConversationReadPosition?> = settings
         .map { current -> current.getConversationReadPosition(_conversationId) }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
@@ -342,6 +345,14 @@ class ChatVM(
             conversationId = _conversationId,
             toolCallId = toolCallId,
             approved = approved,
+        )
+    }
+
+    fun respondAskUser(toolCallId: String, answer: String) {
+        chatService.respondAskUser(
+            conversationId = _conversationId,
+            toolCallId = toolCallId,
+            answer = answer,
         )
     }
 
@@ -703,7 +714,7 @@ class ChatVM(
     fun generateTitle(conversation: Conversation, force: Boolean = false) {
         viewModelScope.launch {
             val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
-            chatService.generateTitle(_conversationId, conversationFull, force)
+            chatService.generateTitle(conversation.id, conversationFull, force)
         }
     }
 

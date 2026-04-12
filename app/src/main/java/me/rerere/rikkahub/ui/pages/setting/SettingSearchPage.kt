@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.content.Context
+import androidx.annotation.StringRes
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 import androidx.compose.animation.core.spring
@@ -40,6 +42,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +80,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -101,6 +107,9 @@ import me.rerere.rikkahub.utils.plus
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
+import me.rerere.search.displayName
+import me.rerere.search.rawAlias
+import me.rerere.search.withAlias
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -112,9 +121,22 @@ import kotlin.reflect.full.primaryConstructor
  */
 data class SearchServicePreset(
     val name: String,
-    val description: String,
+    val description: String? = null,
+    @param:StringRes val descriptionRes: Int? = null,
     val optionsClass: kotlin.reflect.KClass<out SearchServiceOptions>,
     val hasScraping: Boolean = false
+)
+
+private fun SearchServicePreset.resolveDescription(context: Context): String {
+    return descriptionRes?.let(context::getString) ?: description.orEmpty()
+}
+
+private val GROK_SEARCH_MODELS = listOf(
+    "grok-4.20-0309-reasoning",
+    "grok-4.20-0309-non-reasoning",
+    "grok-4.20-multi-agent-0309",
+    "grok-4-1-fast-reasoning",
+    "grok-4-1-fast-non-reasoning",
 )
 
 /**
@@ -143,6 +165,12 @@ val SEARCH_SERVICE_PRESETS = listOf(
         name = "Brave",
         description = "Privacy-focused web search",
         optionsClass = SearchServiceOptions.BraveOptions::class,
+        hasScraping = false
+    ),
+    SearchServicePreset(
+        name = "Grok",
+        descriptionRes = R.string.setting_search_preset_grok_desc,
+        optionsClass = SearchServiceOptions.GrokOptions::class,
         hasScraping = false
     ),
     SearchServicePreset(
@@ -485,7 +513,22 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                     ),
                     style = MaterialTheme.typography.headlineSmall
                 )
-                
+
+                // Alias field (common to all service types)
+                FormItem(
+                    label = { Text(stringResource(R.string.setting_search_page_alias)) }
+                ) {
+                    OutlinedTextField(
+                        value = currentService.rawAlias,
+                        onValueChange = { currentService = currentService.withAlias(it) },
+                        placeholder = {
+                            Text(SearchServiceOptions.TYPES[currentService::class] ?: "")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
+
                 // Configuration options based on service type
                 LazyColumn(
                     modifier = Modifier
@@ -537,6 +580,11 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                             }
                             is SearchServiceOptions.PerplexityOptions -> {
                                 PerplexityOptions(currentService as SearchServiceOptions.PerplexityOptions) {
+                                    currentService = it
+                                }
+                            }
+                            is SearchServiceOptions.GrokOptions -> {
+                                GrokOptions(currentService as SearchServiceOptions.GrokOptions) {
                                     currentService = it
                                 }
                             }
@@ -618,6 +666,7 @@ private fun AddSearchServiceButton(
 ) {
     var showBottomSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     IconButton(
         onClick = {
@@ -696,8 +745,9 @@ private fun AddSearchServiceButton(
                         SEARCH_SERVICE_PRESETS
                     } else {
                         SEARCH_SERVICE_PRESETS.filter { preset ->
+                            val description = preset.resolveDescription(context)
                             preset.name.contains(searchQuery, ignoreCase = true) ||
-                            preset.description.contains(searchQuery, ignoreCase = true)
+                                description.contains(searchQuery, ignoreCase = true)
                         }
                     }
                 }
@@ -763,12 +813,13 @@ private fun AddSearchServiceButton(
                                         modifier = Modifier.size(40.dp)
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
+                                        val description = preset.resolveDescription(context)
                                         Text(
                                             text = preset.name,
                                             style = MaterialTheme.typography.titleMedium
                                         )
                                         Text(
-                                            text = preset.description,
+                                            text = description,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
@@ -807,9 +858,9 @@ private fun SearchServiceItemContent(
     onClick: () -> Unit,
     dragHandle: @Composable () -> Unit
 ) {
-    val serviceName = SearchServiceOptions.TYPES[service::class] ?: "Unknown"
+    val serviceTypeName = SearchServiceOptions.TYPES[service::class] ?: "Unknown"
     val hasScraping = SearchService.getService(service).scrapingParameters != null
-    
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -824,16 +875,16 @@ private fun SearchServiceItemContent(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AutoAIIcon(
-            name = serviceName,
+            name = serviceTypeName,
             modifier = Modifier.size(40.dp)
         )
-        
+
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = serviceName,
+                text = service.displayName,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1325,6 +1376,97 @@ private fun PerplexityOptions(
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
+    }
+}
+
+@Composable
+private fun GrokOptions(
+    options: SearchServiceOptions.GrokOptions,
+    onUpdateOptions: (SearchServiceOptions.GrokOptions) -> Unit
+) {
+    FormItem(
+        label = {
+            Text(stringResource(R.string.setting_search_page_api_key))
+        }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = {
+                onUpdateOptions(
+                    options.copy(
+                        apiKey = it
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    FormItem(
+        label = {
+            Text(stringResource(R.string.setting_search_page_model))
+        },
+        description = {
+            Text(stringResource(R.string.setting_search_page_grok_model_desc))
+        }
+    ) {
+        var modelExpanded by remember { mutableStateOf(false) }
+        val focusManager = LocalFocusManager.current
+        val modelOptions = remember(options.model) {
+            if (options.model in GROK_SEARCH_MODELS) {
+                GROK_SEARCH_MODELS
+            } else {
+                listOf(options.model) + GROK_SEARCH_MODELS
+            }.distinct()
+        }
+        Box(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            OutlinedTextField(
+                value = options.model,
+                onValueChange = { model ->
+                    onUpdateOptions(
+                        options.copy(
+                            model = model
+                        )
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            focusManager.clearFocus(force = true)
+                            modelExpanded = !modelExpanded
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = stringResource(R.string.a11y_expand)
+                        )
+                    }
+                }
+            )
+            DropdownMenu(
+                expanded = modelExpanded,
+                onDismissRequest = { modelExpanded = false },
+                modifier = Modifier.fillMaxWidth(0.92f)
+            ) {
+                modelOptions.forEach { model ->
+                    DropdownMenuItem(
+                        text = { Text(model) },
+                        onClick = {
+                            modelExpanded = false
+                            focusManager.clearFocus(force = true)
+                            onUpdateOptions(
+                                options.copy(
+                                    model = model
+                                )
+                            )
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 

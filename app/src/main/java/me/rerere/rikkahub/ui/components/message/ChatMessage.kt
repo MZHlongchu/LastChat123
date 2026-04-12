@@ -16,7 +16,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -156,6 +156,7 @@ fun ChatMessage(
     showInlineTokenUsage: Boolean = true,
     hiddenToolCallIds: Set<String> = emptySet(),
     leadingProcessParts: List<List<UIMessagePart>> = emptyList(),
+    reasoningBodyStates: SnapshotStateMap<String, ReasoningBodyState>? = null,
     conversationId: Uuid? = null,
     onCitationClick: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -192,14 +193,10 @@ fun ChatMessage(
     )
     var showActionsSheet by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
-    // Track if user clicked to expand action bar on previous messages
-    var actionsExpanded by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
-    
-    // Action buttons show inline for:
-    // - Last messages (always visible when not loading)
-    // - Previous messages (when user clicks to expand)
-    val showInlineActions = !loading && (isLast || actionsExpanded)
+
+    // Action buttons always shown when not loading
+    val showInlineActions = !loading
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
 
@@ -264,20 +261,12 @@ fun ChatMessage(
                 isLast = isLast,
                 hiddenToolCallIds = hiddenToolCallIds,
                 leadingProcessParts = emptyList(),
+                reasoningBodyStates = reasoningBodyStates,
                 renderBlocksOverride = displayState.renderBlocks,
                 conversationId = conversationId,
                 onCitationClick = onCitationClick,
                 loading = loading,
                 model = model,
-                onBubbleClick = {
-                    // For previous messages, toggle action bar visibility
-                    // For last messages (already showing), open the action sheet
-                    if (isLast) {
-                        showActionsSheet = true
-                    } else {
-                        actionsExpanded = !actionsExpanded
-                    }
-                },
                 usage = message.usage,
                 generationDurationMs = message.generationDurationMs,
                 showTokenUsage = settings.showTokenUsage && showInlineTokenUsage,
@@ -320,7 +309,7 @@ fun ChatMessage(
         ) {
             ChatMessageActionButtons(
                 message = message,
-                copyText = displayState.copyText,
+                copyText = displayState.selectionCopyText,
                 ttsText = displayState.ttsText,
                 onRegenerate = onRegenerate,
                 onContinue = onContinue,
@@ -386,11 +375,11 @@ private fun MessagePartsBlock(
     isLast: Boolean,
     hiddenToolCallIds: Set<String>,
     leadingProcessParts: List<UIMessagePart>,
+    reasoningBodyStates: SnapshotStateMap<String, ReasoningBodyState>? = null,
     renderBlocksOverride: List<MessageRenderBlock>? = null,
     conversationId: Uuid?,
     onCitationClick: (String) -> Unit,
     loading: Boolean,
-    onBubbleClick: () -> Unit = {},
     usage: me.rerere.ai.core.TokenUsage? = null,
     generationDurationMs: Long? = null,
     showTokenUsage: Boolean = false,
@@ -431,6 +420,7 @@ private fun MessagePartsBlock(
                     loading = loading,
                     model = model,
                     assistant = assistant,
+                    reasoningBodyStates = reasoningBodyStates,
                 )
             }
 
@@ -440,7 +430,6 @@ private fun MessagePartsBlock(
                     role = role,
                     part = block.part,
                     textIndex = block.textIndex,
-                    onBubbleClick = onBubbleClick,
                     onCitationClick = ::handleClickCitation,
                 )
             }
@@ -547,12 +536,10 @@ private fun MessageTextPart(
     role: MessageRole,
     part: UIMessagePart.Text,
     textIndex: Int,
-    onBubbleClick: () -> Unit,
     onCitationClick: (String) -> Unit,
 ) {
     if (role == MessageRole.USER) {
         Card(
-            onClick = onBubbleClick,
             modifier = Modifier.animateContentSize(
                 animationSpec = spring(
                     dampingRatio = 0.7f,
@@ -562,14 +549,16 @@ private fun MessageTextPart(
             shape = me.rerere.rikkahub.ui.theme.AppShapes.CardLarge,
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                MarkdownBlock(
-                    content = part.text.replaceRegexes(
-                        assistant = assistant,
-                        scope = AssistantAffectScope.USER,
-                        visual = true,
-                    ),
-                    onClickCitation = onCitationClick,
-                )
+                SelectionContainer {
+                    MarkdownBlock(
+                        content = part.text.replaceRegexes(
+                            assistant = assistant,
+                            scope = AssistantAffectScope.USER,
+                            visual = true,
+                        ),
+                        onClickCitation = onCitationClick,
+                    )
+                }
                 if (textIndex == 0) {
                     MarkdownFontDebugInfo(role = role)
                 }
@@ -579,22 +568,23 @@ private fun MessageTextPart(
     }
 
     Column {
-        MarkdownBlock(
-            content = part.text.replaceRegexes(
-                assistant = assistant,
-                scope = AssistantAffectScope.ASSISTANT,
-                visual = true,
-            ),
-            onClickCitation = onCitationClick,
-            modifier = Modifier
-                .clickable(onClick = onBubbleClick)
-                .animateContentSize(
-                    animationSpec = spring(
-                        dampingRatio = 0.7f,
-                        stiffness = 300f
-                    )
+        SelectionContainer(
+            modifier = Modifier.animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = 0.7f,
+                    stiffness = 300f
                 )
-        )
+            )
+        ) {
+            MarkdownBlock(
+                content = part.text.replaceRegexes(
+                    assistant = assistant,
+                    scope = AssistantAffectScope.ASSISTANT,
+                    visual = true,
+                ),
+                onClickCitation = onCitationClick,
+            )
+        }
         if (textIndex == 0) {
             MarkdownFontDebugInfo(role = role)
         }

@@ -78,7 +78,7 @@ android {
         minSdk = 31
         targetSdk = 36
         versionCode = ((System.currentTimeMillis() - 1577808000000) / 60000).toInt() // 基于 2020-01-01 00:00:00 UTC 的分钟数
-        val baseVersionName = "1.4.0"
+        val baseVersionName = "1.4.1"
         val isGithubActions = System.getenv("GITHUB_ACTIONS") == "true"
         versionName = if (isGithubActions) {
             baseVersionName
@@ -197,6 +197,11 @@ android {
     androidResources {
         generateLocaleConfig = true
     }
+    sourceSets {
+        getByName("main") {
+            assets.srcDir("../web-ui/build/client")
+        }
+    }
     applicationVariants.all {
         outputs.all {
             this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
@@ -230,6 +235,19 @@ chaquopy {
 tasks.register("buildAll") {
     dependsOn("assembleRelease", "bundleRelease")
     description = "Build both APK and AAB"
+}
+
+val webUiDir = rootProject.file("web-ui")
+val webUiBuildDir = File(webUiDir, "build/client")
+
+val buildWebUi by tasks.registering(Exec::class) {
+    workingDir = webUiDir
+    commandLine("npm", "run", "build")
+    outputs.dir(webUiBuildDir)
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildWebUi)
 }
 
 ksp {
@@ -305,6 +323,16 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
 
+    // ktor server
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.auth)
+    implementation(libs.ktor.server.auth.jwt)
+    implementation(libs.ktor.server.compression)
+    implementation(libs.ktor.server.content.negotiation)
+    implementation(libs.ktor.server.default.headers)
+    implementation(libs.ktor.server.status.pages)
+    implementation(libs.jmdns)
 
     // pebble (template engine)
     implementation(libs.pebble)

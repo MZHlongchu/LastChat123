@@ -13,12 +13,15 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
@@ -34,6 +37,7 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.AskUserState
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UsedLorebookEntry
 import me.rerere.ai.ui.UsedMemory
@@ -80,6 +84,8 @@ private const val MCP_TOOL_APPROVAL_REJECTED_TEXT = "User declined this call"
 private const val META_ANTHROPIC_TYPE = "anthropic_type"
 private const val TYPE_SERVER_TOOL_USE = "server_tool_use"
 private const val CLAUDE_WEB_SEARCH_TOOL_NAME = "web_search"
+private const val GROK_WEB_SEARCH_TOOL_NAME = "web_search"
+private const val GROK_X_SEARCH_TOOL_NAME = "x_search"
 
 /**
  * Result of building messages, includes both the messages and info about activated context sources.
@@ -126,6 +132,7 @@ class GenerationHandler(
         enabledModeIds: Set<Uuid> = emptySet(),
         source: AIRequestSource = AIRequestSource.OTHER,
         toolApprovalHandler: ToolApprovalHandler? = null,
+        askUserHandler: AskUserHandler? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -218,7 +225,10 @@ class GenerationHandler(
                 val isClaudeBuiltInWebSearchToolCall =
                     toolCall.toolName == CLAUDE_WEB_SEARCH_TOOL_NAME &&
                         model.tools.contains(BuiltInTools.ClaudeWebSearch)
-                isServerToolUseByMetadata || isClaudeBuiltInWebSearchToolCall
+                val isGrokBuiltInToolCall =
+                    (toolCall.toolName == GROK_WEB_SEARCH_TOOL_NAME && model.tools.contains(BuiltInTools.GrokWebSearch)) ||
+                        (toolCall.toolName == GROK_X_SEARCH_TOOL_NAME && model.tools.contains(BuiltInTools.GrokXSearch))
+                isServerToolUseByMetadata || isClaudeBuiltInWebSearchToolCall || isGrokBuiltInToolCall
             }
             if (toolCalls.isEmpty()) {
                 val shouldResumePauseTurn = latestFinishReasons.any { reason ->
@@ -295,6 +305,56 @@ class GenerationHandler(
                 )
             }
 
+            suspend fun updateAskUser(
+                toolCallId: String,
+                question: String,
+                options: List<String>,
+                state: AskUserState,
+                answer: String? = null,
+                questions: List<UIMessagePart.AskUserQuestion>? = null,
+                answers: List<String>? = null,
+            ) {
+                val currentLastMessage = messages[lastMessageIndex]
+                val parts = currentLastMessage.parts.toMutableList()
+                val idx = parts.indexOfFirst { part ->
+                    part is UIMessagePart.AskUser && part.toolCallId == toolCallId
+                }
+                if (idx >= 0) {
+                    val existing = parts[idx] as UIMessagePart.AskUser
+                    parts[idx] = existing.copy(
+                        state = state,
+                        answer = answer,
+                        questions = questions ?: existing.questions,
+                        answers = answers ?: existing.answers,
+                    )
+                } else {
+                    parts.add(
+                        UIMessagePart.AskUser(
+                            toolCallId = toolCallId,
+                            question = question,
+                            options = options,
+                            questions = questions,
+                            state = state,
+                            answer = answer,
+                            answers = answers,
+                        )
+                    )
+                }
+                messages = messages.toMutableList().apply {
+                    set(lastMessageIndex, currentLastMessage.copy(parts = parts))
+                }
+                emit(
+                    GenerationChunk.Messages(
+                        messages.transforms(
+                            transformers = outputTransformers,
+                            context = context,
+                            model = model,
+                            assistant = assistant,
+                        )
+                    )
+                )
+            }
+
             // handle tool calls
             val results = arrayListOf<UIMessagePart.ToolResult>()
             resolvedToolCalls.forEach { toolCall ->
@@ -336,6 +396,109 @@ class GenerationHandler(
                                 tool.execute(args)
                             } else {
                                 JsonPrimitive(rejectionText)
+                            }
+                        }
+                    } else if (toolCall.toolName == "ask_user" && conversationId != null && askUserHandler != null) {
+                        val questionsArray = args.jsonObject["questions"]?.jsonArray
+                        val parsedQuestions = if (questionsArray != null && questionsArray.isNotEmpty()) {
+                            questionsArray.mapNotNull { item ->
+                                val obj = item.jsonObjectOrNull ?: return@mapNotNull null
+                                val q = obj["question"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                                val opts = obj["options"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                                UIMessagePart.AskUserQuestion(question = q, options = opts)
+                            }
+                        } else {
+                            val singleQuestion = args.jsonObject["question"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val singleOptions = args.jsonObject["options"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                            if (singleQuestion.isNotBlank()) listOf(UIMessagePart.AskUserQuestion(question = singleQuestion, options = singleOptions)) else emptyList()
+                        }
+
+                        if (parsedQuestions.isEmpty()) {
+                            JsonPrimitive("No valid questions provided.")
+                        } else if (parsedQuestions.size == 1) {
+                            val q = parsedQuestions.first()
+                            updateAskUser(
+                                toolCallId = resolvedToolCallId,
+                                question = q.question,
+                                options = q.options,
+                                state = AskUserState.Pending,
+                            )
+                            val answer = runCatching {
+                                askUserHandler.askUser(
+                                    AskUserRequest(
+                                        conversationId = conversationId,
+                                        toolCallId = resolvedToolCallId,
+                                        question = q.question,
+                                        options = q.options,
+                                    )
+                                )
+                            }.getOrNull()
+                            if (answer != null) {
+                                updateAskUser(
+                                    toolCallId = resolvedToolCallId,
+                                    question = q.question,
+                                    options = q.options,
+                                    state = AskUserState.Answered,
+                                    answer = answer,
+                                )
+                                buildJsonObject { put("answer", answer) }
+                            } else {
+                                updateAskUser(
+                                    toolCallId = resolvedToolCallId,
+                                    question = q.question,
+                                    options = q.options,
+                                    state = AskUserState.Dismissed,
+                                )
+                                JsonPrimitive("The user dismissed the question without answering.")
+                            }
+                        } else {
+                            val firstQ = parsedQuestions.first()
+                            updateAskUser(
+                                toolCallId = resolvedToolCallId,
+                                question = firstQ.question,
+                                options = firstQ.options,
+                                questions = parsedQuestions,
+                                state = AskUserState.Pending,
+                            )
+                            val allAnswers = runCatching {
+                                askUserHandler.askUser(
+                                    AskUserRequest(
+                                        conversationId = conversationId,
+                                        toolCallId = resolvedToolCallId,
+                                        question = firstQ.question,
+                                        options = firstQ.options,
+                                    )
+                                )
+                            }.getOrNull()
+                            if (allAnswers != null) {
+                                val answerList = allAnswers.split("\n---\n")
+                                updateAskUser(
+                                    toolCallId = resolvedToolCallId,
+                                    question = firstQ.question,
+                                    options = firstQ.options,
+                                    questions = parsedQuestions,
+                                    state = AskUserState.Answered,
+                                    answers = answerList,
+                                )
+                                buildJsonObject {
+                                    put("answers", buildJsonArray {
+                                        parsedQuestions.forEachIndexed { index, q ->
+                                            add(buildJsonObject {
+                                                put("question", q.question)
+                                                put("answer", answerList.getOrElse(index) { "No answer" })
+                                            })
+                                        }
+                                    })
+                                }
+                            } else {
+                                updateAskUser(
+                                    toolCallId = resolvedToolCallId,
+                                    question = firstQ.question,
+                                    options = firstQ.options,
+                                    questions = parsedQuestions,
+                                    state = AskUserState.Dismissed,
+                                )
+                                JsonPrimitive("The user dismissed the questions without answering.")
                             }
                         }
                     } else {

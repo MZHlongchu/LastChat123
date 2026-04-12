@@ -45,6 +45,8 @@ import me.rerere.rikkahub.service.MemoryConsolidationWorker
 import me.rerere.rikkahub.service.SpontaneousWorker
 import me.rerere.rikkahub.service.AutoBackupScheduler
 import me.rerere.rikkahub.service.scheduledtask.ScheduledTaskRescheduleWorker
+import me.rerere.rikkahub.service.WebServerService
+import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import java.util.concurrent.TimeUnit
@@ -55,8 +57,14 @@ private const val TAG = "LastChatApp"
 
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
+const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 
 class LastChatApp : Application(), SingletonImageLoader.Factory {
+    companion object {
+        lateinit var instance: LastChatApp
+            private set
+    }
+
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         val okHttpClient = runCatching { get<OkHttpClient>() }
             .getOrElse { OkHttpClient.Builder().build() }
@@ -83,6 +91,7 @@ class LastChatApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         startKoin {
             androidLogger()
             androidContext(this@LastChatApp)
@@ -167,6 +176,14 @@ class LastChatApp : Application(), SingletonImageLoader.Factory {
                 }
         }
 
+        // Auto-start web server if it was enabled before the app was killed
+        get<AppScope>().launch {
+            val settings = get<SettingsStore>().settingsFlowRaw.first()
+            if (settings.webServerEnabled) {
+                WebServerService.start(this@LastChatApp, settings.webServerPort)
+            }
+        }
+
         // One-time migration: populate DailyActivityEntity from existing conversation dates
         // This preserves existing streaks when upgrading to the new persistent activity tracking
         get<AppScope>().launch(Dispatchers.IO) {
@@ -211,8 +228,14 @@ class LastChatApp : Application(), SingletonImageLoader.Factory {
             .setName(getString(R.string.notification_channel_chat_live_update))
             .setVibrationEnabled(false)
             .build()
+        val webServerChannel = NotificationChannelCompat
+            .Builder(WEB_SERVER_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(getString(R.string.notification_channel_web_server))
+            .setVibrationEnabled(false)
+            .build()
         notificationManager.createNotificationChannel(chatCompletedChannel)
         notificationManager.createNotificationChannel(chatLiveUpdateChannel)
+        notificationManager.createNotificationChannel(webServerChannel)
     }
 
     override fun onTerminate() {

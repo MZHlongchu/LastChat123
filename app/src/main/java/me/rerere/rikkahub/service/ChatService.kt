@@ -79,6 +79,8 @@ import me.rerere.rikkahub.data.ai.AIRequestLogManager
 import me.rerere.rikkahub.data.ai.AIRequestSource
 import me.rerere.rikkahub.data.ai.ToolApprovalHandler
 import me.rerere.rikkahub.data.ai.ToolApprovalRequest
+import me.rerere.rikkahub.data.ai.AskUserHandler
+import me.rerere.rikkahub.data.ai.AskUserRequest
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_CONTEXT_SUMMARY_PROMPT
 import me.rerere.rikkahub.data.ai.rag.EmbeddingService
@@ -227,6 +229,9 @@ class ChatService(
     private val toolApprovalEarlyResponses = ConcurrentHashMap<String, Boolean>()
     private val toolApprovalDeferreds = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
+    private val askUserEarlyResponses = ConcurrentHashMap<String, String>()
+    private val askUserDeferreds = ConcurrentHashMap<String, CompletableDeferred<String>>()
+
     private fun toolApprovalKey(conversationId: Uuid, toolCallId: String): String {
         return "${conversationId}:${toolCallId}"
     }
@@ -254,6 +259,36 @@ class ChatService(
             return deferred.await()
         } finally {
             toolApprovalDeferreds.remove(key)
+        }
+    }
+
+    private fun askUserKey(conversationId: Uuid, toolCallId: String): String {
+        return "ask:${conversationId}:${toolCallId}"
+    }
+
+    fun respondAskUser(conversationId: Uuid, toolCallId: String, answer: String) {
+        if (toolCallId.isBlank()) return
+        val key = askUserKey(conversationId, toolCallId)
+        val deferred = askUserDeferreds[key]
+        if (deferred != null) {
+            deferred.complete(answer)
+        } else {
+            askUserEarlyResponses[key] = answer
+        }
+    }
+
+    private suspend fun awaitAskUserResponse(conversationId: Uuid, toolCallId: String): String {
+        if (toolCallId.isBlank()) return ""
+        val key = askUserKey(conversationId, toolCallId)
+        askUserEarlyResponses.remove(key)?.let { early ->
+            return early
+        }
+        val deferred = CompletableDeferred<String>()
+        askUserDeferreds[key] = deferred
+        try {
+            return deferred.await()
+        } finally {
+            askUserDeferreds.remove(key)
         }
     }
 
@@ -1081,6 +1116,140 @@ class ChatService(
         }
     }
 
+    suspend fun ensureConversationLoaded(conversationId: Uuid): Conversation? {
+        val currentState = conversations[conversationId]?.value
+        if (currentState != null) return currentState
+        val conversation = withContext(Dispatchers.IO) {
+            conversationRepo.getConversationById(conversationId)
+        } ?: return null
+        updateConversation(conversationId, conversation)
+        return conversation
+    }
+
+    suspend fun createConversation(assistantId: Uuid): Conversation {
+        val settings = settingsStore.settingsFlow.value
+        val assistant = settings.getAssistantById(assistantId) ?: settings.getCurrentAssistant()
+        val conversation = Conversation.ofId(
+            id = Uuid.random(),
+            assistantId = assistant.id,
+        ).updateCurrentMessages(assistant.presetMessages).copy(
+            enabledModeIds = assistant.enabledModeIds,
+        )
+        saveConversation(conversation.id, conversation)
+        return conversation
+    }
+
+    fun stopGeneration(conversationId: Uuid) {
+        cancelGenerationByUser(conversationId)
+    }
+
+    fun isGenerating(conversationId: Uuid): Boolean {
+        return _generationJobs.value[conversationId]?.isActive == true
+    }
+
+    suspend fun editMessage(
+        conversationId: Uuid,
+        messageId: Uuid,
+        parts: List<UIMessagePart>,
+    ) {
+        val currentConversation = ensureConversationLoaded(conversationId) ?: return
+        val updatedConversation = currentConversation.copy(
+            messageNodes = currentConversation.messageNodes.map { node ->
+                if (node.messages.none { it.id == messageId }) return@map node
+                val originalMessage = node.messages.first { it.id == messageId }
+                node.copy(
+                    messages = node.messages + UIMessage(
+                        role = originalMessage.role,
+                        parts = parts,
+                    ),
+                    selectIndex = node.messages.size,
+                )
+            },
+            updateAt = Instant.now(),
+        )
+        saveConversation(conversationId, updatedConversation)
+    }
+
+    suspend fun forkConversationAtMessage(
+        conversationId: Uuid,
+        messageId: Uuid,
+    ): Conversation {
+        val currentConversation = ensureConversationLoaded(conversationId)
+            ?: return Conversation.ofId(Uuid.random())
+
+        val forkEndIndex = currentConversation.messageNodes
+            .indexOfFirst { node -> node.messages.any { it.id == messageId } }
+            .takeIf { it >= 0 }
+            ?: currentConversation.messageNodes.lastIndex
+
+        val nodesToCopy = if (forkEndIndex >= 0) {
+            currentConversation.messageNodes.subList(0, forkEndIndex + 1)
+        } else {
+            emptyList()
+        }
+
+        val forkConversation = Conversation(
+            id = Uuid.random(),
+            assistantId = currentConversation.assistantId,
+            messageNodes = nodesToCopy,
+        )
+        saveConversation(forkConversation.id, forkConversation)
+        return forkConversation
+    }
+
+    suspend fun deleteMessage(
+        conversationId: Uuid,
+        messageId: Uuid,
+    ) {
+        val currentConversation = ensureConversationLoaded(conversationId) ?: return
+        val currentMessages = currentConversation.messageNodes.flatMap { it.messages }
+        val index = currentMessages.indexOfFirst { it.id == messageId }
+        if (index == -1) return
+
+        val allDeleteIds = mutableSetOf(messageId)
+        for (i in index - 1 downTo 0) {
+            val msg = currentMessages[i]
+            if (msg.hasPart<UIMessagePart.ToolCall>() || msg.hasPart<UIMessagePart.ToolResult>()) {
+                allDeleteIds.add(msg.id)
+            } else break
+        }
+        for (i in index + 1 until currentMessages.size) {
+            val msg = currentMessages[i]
+            if (msg.hasPart<UIMessagePart.ToolCall>() || msg.hasPart<UIMessagePart.ToolResult>()) {
+                allDeleteIds.add(msg.id)
+            } else break
+        }
+
+        val updatedConversation = currentConversation.copy(
+            messageNodes = currentConversation.messageNodes.mapNotNull { node ->
+                val newMessages = node.messages.filter { it.id !in allDeleteIds }
+                if (newMessages.isEmpty()) null
+                else {
+                    val newSelectIndex = if (node.selectIndex >= newMessages.size) newMessages.lastIndex else node.selectIndex
+                    node.copy(messages = newMessages, selectIndex = newSelectIndex)
+                }
+            },
+            updateAt = Instant.now(),
+        )
+        saveConversation(conversationId, updatedConversation)
+    }
+
+    suspend fun selectMessageNode(
+        conversationId: Uuid,
+        nodeId: Uuid,
+        selectIndex: Int,
+    ) {
+        val currentConversation = ensureConversationLoaded(conversationId) ?: return
+        val updatedConversation = currentConversation.copy(
+            messageNodes = currentConversation.messageNodes.map { node ->
+                if (node.id != nodeId) node
+                else node.copy(selectIndex = selectIndex.coerceIn(0, node.messages.lastIndex))
+            },
+            updateAt = Instant.now(),
+        )
+        saveConversation(conversationId, updatedConversation)
+    }
+
     /**
      * Switch the assistant for the current conversation.
      *
@@ -1464,7 +1633,7 @@ class ChatService(
             val modelSupportsBuiltIn = model.supportsBuiltInSearch(modelProvider)
             val useBuiltInSearch = assistant.preferBuiltInSearch && modelSupportsBuiltIn
             val runtimeModel = if (useBuiltInSearch) {
-                model.ensureBuiltInSearchTool()
+                model.ensureBuiltInSearchTool(modelProvider)
             } else {
                 model.withoutBuiltInSearchTools()
             }
@@ -1669,11 +1838,15 @@ class ChatService(
                             )
                         )
                     }
+                    if (assistant.localTools.contains(LocalToolOption.AskUser)) {
+                        add(createAskUserTool(conversationId = conversation.id))
+                    }
                 },
                 truncateIndex = conversation.truncateIndex,
                 enabledModeIds = conversation.enabledModeIds,
                 source = AIRequestSource.CHAT,
                 toolApprovalHandler = ToolApprovalHandler { request -> awaitToolApproval(request) },
+                askUserHandler = AskUserHandler { request -> awaitAskUserResponse(request.conversationId, request.toolCallId) },
             ).onCompletion { cause ->
                 finalizeGenerationKeepAlive(cause)
                 if (cause is CancellationException) {
@@ -1999,7 +2172,7 @@ class ChatService(
             val modelSupportsBuiltIn = model.supportsBuiltInSearch(seatProvider)
             val useBuiltInSearch = modelSupportsBuiltIn &&
                 (seatAssistant.searchMode is AssistantSearchMode.BuiltIn || seatAssistant.preferBuiltInSearch)
-            val seatModel = if (useBuiltInSearch) model.ensureBuiltInSearchTool() else model.withoutBuiltInSearchTools()
+            val seatModel = if (useBuiltInSearch) model.ensureBuiltInSearchTool(seatProvider) else model.withoutBuiltInSearchTools()
 
             val seatInputTransformers = buildList {
                 if (includeAppContextTransformer) {
@@ -2191,6 +2364,7 @@ class ChatService(
                 maxSteps = seatMaxSteps,
                 source = AIRequestSource.CHAT,
                 toolApprovalHandler = ToolApprovalHandler { request -> awaitToolApproval(request) },
+                askUserHandler = AskUserHandler { request -> awaitAskUserResponse(request.conversationId, request.toolCallId) },
             ).collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> {
@@ -3724,6 +3898,63 @@ class ChatService(
             ?: error("Workspace work directory is not accessible")
     }
 
+    private fun createAskUserTool(conversationId: Uuid): Tool {
+        return Tool(
+            name = "ask_user",
+            description = "ALWAYS use this tool instead of guessing or making assumptions. Call it whenever: the user's intent is ambiguous, a decision has multiple valid paths, an action is irreversible, or you need information only the user has. Do NOT proceed on your own when uncertain — stop and ask. You can ask MULTIPLE questions at once by providing the \"questions\" array, each with its own question text and 2–4 options. The user will answer them one by one in a wizard. If you only have one question, you can still use the single \"question\" + \"options\" format.",
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("questions", buildJsonObject {
+                            put("type", "array")
+                            put("description", "Array of questions to ask the user. Each question has its own text and 2-4 options. Use this for batch questions.")
+                            put("items", buildJsonObject {
+                                put("type", "object")
+                                put("properties", buildJsonObject {
+                                    put("question", buildJsonObject {
+                                        put("type", "string")
+                                        put("description", "The question text")
+                                    })
+                                    put("options", buildJsonObject {
+                                        put("type", "array")
+                                        put("items", buildJsonObject {
+                                            put("type", "string")
+                                        })
+                                        put("description", "2 to 4 options for the user to choose from")
+                                        put("minItems", 2)
+                                        put("maxItems", 4)
+                                    })
+                                })
+                                put("required", buildJsonArray {
+                                    add(JsonPrimitive("question"))
+                                    add(JsonPrimitive("options"))
+                                })
+                            })
+                            put("minItems", 1)
+                        })
+                        put("question", buildJsonObject {
+                            put("type", "string")
+                            put("description", "A single question (legacy format). Ignored when 'questions' array is provided.")
+                        })
+                        put("options", buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject {
+                                put("type", "string")
+                            })
+                            put("description", "Options for a single question (legacy format). Ignored when 'questions' array is provided.")
+                            put("minItems", 2)
+                            put("maxItems", 4)
+                        })
+                    },
+                    required = listOf()
+                )
+            },
+            execute = {
+                buildJsonObject { put("answer", "") }
+            }
+        )
+    }
+
     private fun createWorkspaceFileTools(
         conversationId: Uuid,
         settingsSnapshot: Settings,
@@ -4828,8 +5059,8 @@ class ChatService(
             }
 
             // 生成完时可能已经开始下一轮流式输出。
-            // 这里必须基于“最新的内存态”合并字段，避免用 DB 的旧快照覆盖 messageNodes，导致消息闪消。
-            val latestConversation = getConversationFlow(conversationId).value
+            // 当前会话要优先用内存态；非当前会话则优先回读真实会话，避免把占位会话写回数据库。
+            val latestConversation = getConversationForMerge(conversationId, conversation)
             val latestFallbackTitle = buildFallbackTitleFromConversation(latestConversation)
             val shouldApplyToLatest = when {
                 force -> true
@@ -4862,6 +5093,25 @@ class ChatService(
         }.onFailure {
             Log.e(TAG, "generateTitle failed: ${it.message}", it)
         }
+    }
+
+    private suspend fun getConversationForMerge(
+        conversationId: Uuid,
+        fallback: Conversation,
+    ): Conversation {
+        val inMemoryConversation = conversations[conversationId]?.value
+        val shouldTrustInMemory = inMemoryConversation != null && (
+            conversationReferences.containsKey(conversationId) ||
+                getGenerationJob(conversationId) != null ||
+                temporaryConversations.contains(conversationId)
+            )
+        if (shouldTrustInMemory) {
+            return inMemoryConversation
+        }
+
+        return conversationRepo.getConversationById(conversationId)
+            ?: inMemoryConversation
+            ?: fallback
     }
 
     private fun buildFallbackTitleFromConversation(conversation: Conversation): String {

@@ -1,11 +1,12 @@
 package me.rerere.rikkahub.ui.components.message
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Lightbulb
@@ -49,10 +51,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -73,9 +77,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.provider.Model
 import me.rerere.ai.registry.ModelRegistry
+import me.rerere.ai.ui.AskUserState
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.getEffectiveDisplaySetting
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -86,8 +92,10 @@ import me.rerere.rikkahub.ui.hooks.HapticPattern
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
 import me.rerere.rikkahub.ui.theme.AppShapes
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.extractGeminiThinkingTitle
+import me.rerere.rikkahub.utils.extractGeminiLastSection
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import org.koin.compose.koinInject
 import java.util.Locale
@@ -115,10 +123,18 @@ private val ProcessStepSubtitleTextStyle
         fontSize = 11.sp,
         lineHeight = 14.sp,
     )
-private enum class ReasoningBodyState {
+enum class ReasoningBodyState {
     Collapsed,
     Preview,
     Expanded,
+}
+
+internal fun processReasoningStateKey(part: UIMessagePart): String? {
+    return when (part) {
+        is UIMessagePart.Reasoning -> "reasoning:${part.createdAt}"
+        is UIMessagePart.Thinking -> "thinking:${part.createdAt}"
+        else -> null
+    }
 }
 
 @Composable
@@ -129,9 +145,13 @@ internal fun ChatProcessTimeline(
     loading: Boolean,
     model: Model?,
     assistant: Assistant?,
+    reasoningBodyStates: SnapshotStateMap<String, ReasoningBodyState>? = null,
     modifier: Modifier = Modifier,
 ) {
     if (processParts.isEmpty()) return
+
+    val localReasoningBodyStates = remember { mutableStateMapOf<String, ReasoningBodyState>() }
+    val resolvedReasoningBodyStates = reasoningBodyStates ?: localReasoningBodyStates
 
     val toolApprovalsById = remember(processParts) {
         processParts.filterIsInstance<UIMessagePart.ToolApproval>()
@@ -252,6 +272,7 @@ internal fun ChatProcessTimeline(
                             isLast = index == visibleParts.lastIndex,
                             conversationId = conversationId,
                             toolCallArgumentsById = toolCallArgumentsById,
+                            reasoningBodyStates = resolvedReasoningBodyStates,
                             loading = loading,
                             model = model,
                             assistant = assistant,
@@ -269,6 +290,7 @@ private fun ProcessTimelineStep(
     isLast: Boolean,
     conversationId: Uuid?,
     toolCallArgumentsById: Map<String, JsonElement>,
+    reasoningBodyStates: SnapshotStateMap<String, ReasoningBodyState>,
     loading: Boolean,
     model: Model?,
     assistant: Assistant?,
@@ -292,6 +314,8 @@ private fun ProcessTimelineStep(
                 when (part) {
                     is UIMessagePart.Reasoning -> CompactReasoningTimelineItem(
                         reasoning = part,
+                        stateKey = processReasoningStateKey(part) ?: "reasoning:${part.createdAt}",
+                        reasoningBodyStates = reasoningBodyStates,
                         model = model,
                         assistant = assistant,
                     )
@@ -303,6 +327,8 @@ private fun ProcessTimelineStep(
                             finishedAt = part.finishedAt,
                             metadata = part.metadata,
                         ),
+                        stateKey = processReasoningStateKey(part) ?: "thinking:${part.createdAt}",
+                        reasoningBodyStates = reasoningBodyStates,
                         model = model,
                         assistant = assistant,
                     )
@@ -335,6 +361,12 @@ private fun ProcessTimelineStep(
                         loading = loading && part.state == ToolApprovalState.Approved,
                     )
 
+                    is UIMessagePart.AskUser -> CompactAskUserTimelineItem(
+                        conversationId = conversationId,
+                        askUser = part,
+                        loading = loading && part.state == AskUserState.Pending,
+                    )
+
                     else -> Unit
                 }
             }
@@ -355,7 +387,7 @@ private fun ProcessTimelineStep(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .padding(top = 2.dp)
+                        .padding(top = 5.75.dp)
                         .size(14.dp),
                 )
                 if (!isLast) {
@@ -378,26 +410,50 @@ private fun ProcessTimelineStep(
 @Composable
 private fun CompactReasoningTimelineItem(
     reasoning: UIMessagePart.Reasoning,
+    stateKey: String,
+    reasoningBodyStates: SnapshotStateMap<String, ReasoningBodyState>,
     model: Model?,
     assistant: Assistant?,
 ) {
     val settings = LocalSettings.current
+    val effectiveDisplay = settings.getEffectiveDisplaySetting(assistant)
     val haptics = rememberPremiumHaptics(enabled = settings.displaySetting.enableUIHaptics)
     val loading = reasoning.finishedAt == null
     val scrollState = rememberScrollState()
-    var bodyState by remember(reasoning.createdAt) {
-        mutableStateOf(
-            if (loading) {
-                ReasoningBodyState.Preview
-            } else {
-                ReasoningBodyState.Collapsed
-            }
-        )
+    val defaultBodyState = if (loading) {
+        ReasoningBodyState.Preview
+    } else {
+        ReasoningBodyState.Collapsed
     }
+    val bodyState = reasoningBodyStates[stateKey] ?: defaultBodyState
     var duration by remember(reasoning.finishedAt, reasoning.createdAt) {
         mutableStateOf(
             reasoning.finishedAt?.let { it - reasoning.createdAt } ?: (Clock.System.now() - reasoning.createdAt)
         )
+    }
+
+    LaunchedEffect(stateKey, loading) {
+        if (reasoningBodyStates[stateKey] == null) {
+            reasoningBodyStates[stateKey] = defaultBodyState
+        }
+    }
+
+    LaunchedEffect(stateKey, loading, effectiveDisplay.autoCloseThinking) {
+        val currentState = reasoningBodyStates[stateKey] ?: defaultBodyState
+        if (loading) {
+            if (currentState == ReasoningBodyState.Collapsed) {
+                reasoningBodyStates[stateKey] = ReasoningBodyState.Preview
+            }
+        } else {
+            val targetState = if (effectiveDisplay.autoCloseThinking) {
+                ReasoningBodyState.Collapsed
+            } else {
+                ReasoningBodyState.Expanded
+            }
+            if (currentState != targetState) {
+                reasoningBodyStates[stateKey] = targetState
+            }
+        }
     }
 
     LaunchedEffect(loading) {
@@ -409,92 +465,106 @@ private fun CompactReasoningTimelineItem(
         }
     }
 
+    val isGemini = model != null && ModelRegistry.GEMINI_SERIES.match(model.modelId)
+
     LaunchedEffect(reasoning.reasoning, loading, bodyState) {
-        if (loading && bodyState == ReasoningBodyState.Preview) {
+        if (loading && bodyState == ReasoningBodyState.Preview && !isGemini) {
             withFrameNanos { }
             scrollState.animateScrollTo(scrollState.maxValue)
         }
     }
 
     val geminiTitle = remember(reasoning.reasoning, model) {
-        if (loading && model != null && ModelRegistry.GEMINI_SERIES.match(model.modelId)) {
+        if (loading && isGemini) {
             reasoning.reasoning.extractGeminiThinkingTitle()
         } else {
             null
         }
     }
 
-    ProcessStepRow(
-        title = if (duration > 0.seconds) {
-            stringResource(
-                R.string.chat_process_reasoning_duration,
-                formatDurationSeconds(duration),
-            )
-        } else {
-            stringResource(R.string.notification_live_update_inference)
-        },
-        subtitle = geminiTitle,
-        trailingIcon = if (bodyState == ReasoningBodyState.Expanded) {
-            Icons.Rounded.KeyboardArrowUp
-        } else {
-            Icons.Rounded.KeyboardArrowDown
-        },
-        onClick = {
-            bodyState = when (bodyState) {
-                ReasoningBodyState.Collapsed,
-                ReasoningBodyState.Preview,
-                    -> ReasoningBodyState.Expanded
+    Column {
+        ProcessStepRow(
+            title = if (duration > 0.seconds) {
+                stringResource(
+                    R.string.chat_process_reasoning_duration,
+                    formatDurationSeconds(duration),
+                )
+            } else {
+                stringResource(R.string.notification_live_update_inference)
+            },
+            subtitle = geminiTitle?.takeIf { bodyState == ReasoningBodyState.Collapsed },
+            trailingIcon = if (bodyState == ReasoningBodyState.Expanded) {
+                Icons.Rounded.KeyboardArrowUp
+            } else {
+                Icons.Rounded.KeyboardArrowDown
+            },
+            onClick = {
+                reasoningBodyStates[stateKey] = when (bodyState) {
+                    ReasoningBodyState.Collapsed,
+                    ReasoningBodyState.Preview,
+                        -> ReasoningBodyState.Expanded
 
-                ReasoningBodyState.Expanded -> ReasoningBodyState.Collapsed
-            }
-            haptics.perform(HapticPattern.Pop)
-        },
-    )
+                    ReasoningBodyState.Expanded -> ReasoningBodyState.Collapsed
+                }
+                haptics.perform(HapticPattern.Pop)
+            },
+        )
 
-    AnimatedVisibility(
-        visible = bodyState != ReasoningBodyState.Collapsed,
-        enter = fadeIn(
-            animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
-        ) + expandVertically(
-            expandFrom = Alignment.Top,
-            animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
-        ),
-        exit = fadeOut(
-            animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
-        ) + shrinkVertically(
-            shrinkTowards = Alignment.Top,
-            animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
-        ),
-    ) {
-        SelectionContainer {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateContentSize(
-                        animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f)
-                    )
-            ) {
-                MarkdownBlock(
-                    content = reasoning.reasoning.replaceRegexes(
-                        assistant = assistant,
-                        scope = AssistantAffectScope.ASSISTANT,
-                        visual = true,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
+        if (bodyState != ReasoningBodyState.Collapsed) {
+            Spacer(modifier = Modifier.height(4.dp))
+            SelectionContainer {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (bodyState == ReasoningBodyState.Preview) {
-                                Modifier
-                                    .heightIn(max = 88.dp)
-                                    .clipToBounds()
-                                    .verticalScroll(scrollState)
-                            } else {
-                                Modifier
-                            }
+                        .animateContentSize(
+                            animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f)
                         )
-                        .padding(start = 4.dp, end = 8.dp),
-                )
+                ) {
+                    if (isGemini && loading && bodyState == ReasoningBodyState.Preview) {
+                        AnimatedContent(
+                            targetState = geminiTitle ?: "",
+                            transitionSpec = {
+                                (slideInVertically { it } + fadeIn()) togetherWith
+                                        (slideOutVertically { -it } + fadeOut())
+                            },
+                        ) {
+                            MarkdownBlock(
+                                content = reasoning.reasoning.extractGeminiLastSection()
+                                    .replaceRegexes(
+                                        assistant = assistant,
+                                        scope = AssistantAffectScope.ASSISTANT,
+                                        visual = true,
+                                    ),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 4.dp, end = 8.dp),
+                            )
+                        }
+                    } else {
+                        MarkdownBlock(
+                            content = reasoning.reasoning.replaceRegexes(
+                                assistant = assistant,
+                                scope = AssistantAffectScope.ASSISTANT,
+                                visual = true,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (bodyState == ReasoningBodyState.Preview) {
+                                        Modifier
+                                            .heightIn(max = 88.dp)
+                                            .clipToBounds()
+                                            .verticalScroll(scrollState)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(start = 4.dp, end = 8.dp),
+                        )
+                    }
+                }
             }
         }
     }
@@ -738,7 +808,7 @@ private fun ProcessStepRow(
 
     Row(
         modifier = rowModifier,
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Column(
@@ -770,7 +840,6 @@ private fun ProcessStepRow(
                 imageVector = trailingIcon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 1.dp),
             )
         }
     }
@@ -847,6 +916,7 @@ private fun toolTimelineTitle(
             }
         }
         "eval_python" -> stringResource(R.string.chat_message_tool_run_python_generic)
+        "ask_user" -> stringResource(R.string.ask_user_answer_title)
         else -> stringResource(R.string.chat_message_tool_call_generic, toolName)
     }
 }
@@ -882,6 +952,24 @@ private fun toolTimelineSubtitle(
                     ?.contentOrNull
         }
 
+        "ask_user" -> {
+            val singleAnswer = runCatching {
+                content?.jsonObject?.get("answer")?.jsonPrimitiveOrNull?.contentOrNull
+            }.getOrNull()
+            if (singleAnswer != null) {
+                singleAnswer
+            } else {
+                val answers = content?.jsonObject?.get("answers")?.jsonArray
+                if (answers != null && answers.isNotEmpty()) {
+                    answers.mapNotNull { it.jsonObjectOrNull?.get("answer")?.jsonPrimitiveOrNull?.contentOrNull }.joinToString(", ")
+                } else if (content != null) {
+                    stringResource(R.string.ask_user_no_reply)
+                } else {
+                    null
+                }
+            }
+        }
+
         else -> null
     }
 }
@@ -893,6 +981,7 @@ private fun processTimelineIcon(part: UIMessagePart): ImageVector {
             -> Icons.Rounded.Lightbulb
 
         is UIMessagePart.ToolApproval -> Icons.Rounded.Extension
+        is UIMessagePart.AskUser -> Icons.Rounded.HelpOutline
         is UIMessagePart.ToolCall -> processTimelineToolIcon(part.toolName)
         is UIMessagePart.ToolResult -> processTimelineToolIcon(part.toolName)
         else -> Icons.Rounded.Build
@@ -904,7 +993,124 @@ private fun processTimelineToolIcon(toolName: String): ImageVector {
         "search_web", "scrape_web" -> Icons.Rounded.Public
         "run_skill_script", "eval_python" -> Icons.Rounded.Terminal
         "create_memory", "edit_memory", "delete_memory" -> Icons.Rounded.Bookmark
+        "ask_user" -> Icons.Rounded.HelpOutline
         else -> Icons.Rounded.Build
+    }
+}
+
+@Composable
+private fun CompactAskUserTimelineItem(
+    conversationId: Uuid?,
+    askUser: UIMessagePart.AskUser,
+    loading: Boolean,
+) {
+    val chatService = koinInject<ChatService>()
+    val settings = LocalSettings.current
+    val haptics = rememberPremiumHaptics(enabled = settings.displaySetting.enableUIHaptics)
+    var showSheet by remember(askUser.toolCallId) { mutableStateOf(false) }
+    val canRespond = conversationId != null && askUser.toolCallId.isNotBlank() && askUser.state == AskUserState.Pending
+    val multiQuestions = askUser.questions
+    val isMultiQuestion = multiQuestions != null && multiQuestions.size > 1
+
+    LaunchedEffect(askUser.toolCallId) {
+        if (askUser.state == AskUserState.Pending) {
+            showSheet = true
+        }
+    }
+
+    val subtitle = if (isMultiQuestion) {
+        "${multiQuestions!!.first().question}… (+${multiQuestions.size - 1})"
+    } else {
+        askUser.question
+    }
+
+    ProcessStepRow(
+        title = stringResource(R.string.ask_user_step_title),
+        subtitle = subtitle,
+        trailing = {
+            when (askUser.state) {
+                AskUserState.Pending -> {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                AskUserState.Answered -> Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+                AskUserState.Dismissed -> Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        },
+        onClick = if (canRespond) ({
+            haptics.perform(HapticPattern.Pop)
+            showSheet = true
+        }) else null,
+    )
+
+    if (showSheet && canRespond) {
+        if (isMultiQuestion && multiQuestions != null) {
+            AskUserWizardBottomSheet(
+                questions = multiQuestions,
+                onComplete = { combinedAnswers: String ->
+                    showSheet = false
+                    haptics.perform(HapticPattern.Success)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserWizardBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = combinedAnswers,
+                    )
+                },
+                onDismissRequest = {
+                    showSheet = false
+                    haptics.perform(HapticPattern.Pop)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserWizardBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = "",
+                    )
+                },
+            )
+        } else {
+            AskUserBottomSheet(
+                question = askUser.question,
+                options = askUser.options,
+                onSelect = { answer ->
+                    showSheet = false
+                    haptics.perform(HapticPattern.Pop)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = answer,
+                    )
+                },
+                onDismissRequest = {
+                    showSheet = false
+                    haptics.perform(HapticPattern.Pop)
+                    chatService.respondAskUser(
+                        conversationId = conversationId ?: return@AskUserBottomSheet,
+                        toolCallId = askUser.toolCallId,
+                        answer = "",
+                    )
+                },
+            )
+        }
     }
 }
 

@@ -66,6 +66,7 @@ import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.InvertColors
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.RecordVoiceOver
@@ -251,6 +252,13 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     )
 
                     SettingGroupItem(
+                        title = stringResource(R.string.setting_page_web_server),
+                        subtitle = stringResource(R.string.setting_page_web_server_desc),
+                        icon = { Icon(Icons.Rounded.Language, null, modifier = Modifier.size(20.dp)) },
+                        onClick = { navController.navigate(Screen.SettingWeb) }
+                    )
+
+                    SettingGroupItem(
                         title = stringResource(R.string.setting_android_integration),
                         subtitle = stringResource(R.string.setting_android_integration_desc),
                         icon = { Icon(Icons.Rounded.PhoneAndroid, null, modifier = Modifier.size(20.dp)) },
@@ -303,16 +311,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         onClick = { navController.navigate(Screen.SettingAbout) }
                     )
                     
-                    val context = LocalContext.current
-                    SettingGroupItem(
-                        title = "Buy Me a Coffee",
-                        subtitle = "Support the development",
-                        icon = { Icon(Icons.Rounded.Favorite, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
-                        onClick = { 
-                            context.openUrl("https://buymeacoffee.com/cocolalilal")
-                        }
-                    )
-
                     SettingGroupItem(
                         title = stringResource(R.string.developer_page_tab_request_logs),
                         subtitle = stringResource(R.string.setting_request_logs_desc),
