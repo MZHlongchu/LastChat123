@@ -280,6 +280,34 @@ jobs:
           if [ -n "${{ secrets.SIGNING_CONFIG }}" ]; then
             echo "${{ secrets.SIGNING_CONFIG }}" > local.properties
           fi
+          
+      ##### 安装 Node.js 和 Web UI 依赖 #####
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Web UI dependencies
+        run: |
+          # 自动查找包含 react-router 的 package.json
+          WEBUI_DIR=""
+          for pkg in $(find . -name "package.json" -not -path "*/node_modules/*" -type f); do
+            if grep -q "react-router" "$pkg" 2>/dev/null; then
+              WEBUI_DIR="$(dirname "$pkg")"
+              echo "Found Web UI at: $WEBUI_DIR"
+              break
+            fi
+          done
+          
+          if [ -z "$WEBUI_DIR" ]; then
+            echo "❌ Could not find Web UI package.json with react-router"
+            exit 1
+          fi
+          
+          cd "$WEBUI_DIR"
+          npm ci
+          echo "✅ Web UI dependencies installed"
+
 
       - name: Gradle Build Release
         run: |
