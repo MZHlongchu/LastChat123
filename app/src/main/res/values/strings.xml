@@ -24,12 +24,21 @@
     <string name="developer_option_ipv6_probe_http_title">External IPv6 (6.ipw.cn)</string>
     <string name="developer_option_ipv6_probe_system_title">Default network IPv6</string>
     <string name="developer_option_ipv6_probe_not_found">No IPv6 detected</string>
+    <string name="developer_option_manual_update_title">Manual Update Check</string>
+    <string name="developer_option_manual_update_desc">Check for updates from GitHub API or Cloudflare cache.</string>
+    <string name="developer_option_manual_update_source_github">GitHub</string>
+    <string name="developer_option_manual_update_source_cloudflare">Cloudflare</string>
+    <string name="developer_option_manual_update_action">Check</string>
+    <string name="developer_option_manual_update_loading">Checking…</string>
+    <string name="developer_option_manual_update_no_result">No release found</string>
+    <string name="developer_option_manual_update_error_prefix">Error: %1$s</string>
     <string name="setting_request_logs_desc">View AI request logs.</string>
     <string name="setting_request_logs_enable_developer_mode_first">Enable Developer Mode to view logs.</string>
     <string name="request_log_status_ok">OK</string>
     <string name="request_log_status_error">Error</string>
     <string name="request_logs_empty">No request logs yet</string>
     <string name="request_logs_filter_all">All</string>
+    <string name="request_logs_filter_error">Errors Only</string>
     <string name="request_logs_export_empty">No logs to export</string>
     <string name="request_logs_export_failed">Failed to export logs: %1$s</string>
     <string name="request_log_empty_details">Select a log to view details</string>
@@ -95,6 +104,18 @@
     <string name="assistant_page_chaotic">Chaotic (Dangerous)</string>
     <string name="assistant_page_chat_background">Chat Background</string>
     <string name="assistant_page_chat_background_desc">Set background image for assistant chat page</string>
+    <string name="assistant_page_background_blur">Background Blur</string>
+    <string name="assistant_page_background_blur_desc">Apply blur effect to background image</string>
+    <string name="assistant_page_blur_radius">Blur Radius</string>
+    <string name="assistant_page_color_overlay">Color Overlay</string>
+    <string name="assistant_page_color_overlay_desc">Add color overlay for better readability</string>
+    <string name="assistant_page_overlay_opacity">Overlay Opacity</string>
+    <string name="assistant_page_overlay_color_auto">Auto</string>
+    <string name="assistant_page_overlay_color_manual">Manual</string>
+    <string name="assistant_page_overlay_dark_color">Dark Mode</string>
+    <string name="assistant_page_overlay_light_color">Light Mode</string>
+    <string name="color_picker_recommended">Recommended</string>
+    <string name="color_picker_recent">Recent</string>
     <string name="assistant_page_chat_model">Chat Model</string>
     <string name="assistant_page_chat_model_desc">Set default chat model for assistant. If not set, global default will be used.</string>
     <string name="assistant_page_clone">Clone</string>
@@ -189,6 +210,8 @@
     <string name="assistant_page_local_tools_workspace_files_desc">Allow assistant to read/write files in the current conversation workspace. Requires workspace root permission.</string>
     <string name="assistant_page_local_tools_lorebooks_editor_title">Lorebooks Editor</string>
     <string name="assistant_page_local_tools_lorebooks_editor_desc">Allow assistant to create/update/delete entries in enabled lorebooks (undoable via history).</string>
+    <string name="assistant_page_local_tools_memory_search_title">Memory Search</string>
+    <string name="assistant_page_local_tools_memory_search_desc">Allow assistant to look up its saved memories by keyword during the conversation.</string>
     <string name="assistant_page_local_tools_scheduled_task_manager_title">Scheduled Task Manager</string>
     <string name="assistant_page_local_tools_scheduled_task_manager_desc">Allow assistant to create, update, and delete scheduled tasks (requires approval)</string>
     <string name="assistant_page_local_tools_ask_user_title">Ask User</string>
@@ -401,6 +424,7 @@
     <string name="ask_user_wizard_progress">Question %1$d / %2$d</string>
     <string name="ask_user_wizard_skip">Skip</string>
     <string name="ask_user_wizard_next">Next</string>
+    <string name="ask_user_wizard_previous">Previous</string>
     <string name="tool_approval_view_params">View params</string>
     <string name="tool_approval_workspace_list">List workspace files</string>
     <string name="tool_approval_workspace_read_file">Read workspace file</string>
@@ -594,6 +618,7 @@
     <string name="notification_live_update_waiting">Waiting</string>
     <string name="notification_live_update_inference">Reasoning</string>
     <string name="notification_live_update_tool_call">Using tools</string>
+    <string name="notification_live_update_waiting_for_answer">Waiting for answer</string>
     <string name="notification_live_update_output">Generating</string>
     <string name="notification_live_update_done">Generation completed</string>
     <string name="notification_live_update_error">Generation failed</string>
@@ -676,6 +701,8 @@
     <string name="setting_display_page_font_size_title">Font Size</string>
     <string name="setting_display_page_notification_message_generated">Notification on Completion</string>
     <string name="setting_display_page_notification_message_generated_desc">Show notification when message generation completes in background</string>
+    <string name="setting_display_page_hide_suggestions_overlap_title">Auto-hide suggestions on overlap</string>
+    <string name="setting_display_page_hide_suggestions_overlap_desc">Fade out chat suggestions when they cover message text</string>
     <string name="setting_display_page_notification_live_update">Live Update Mode</string>
     <string name="setting_display_page_notification_live_update_desc">Notifications will be pushed during message generation after enabling. If it does not take effect, please select Compatibility Mode.</string>
     <string name="setting_live_update_mode_off">Off</string>
@@ -1055,6 +1082,9 @@
     <string name="setting_page_search_provider_type">Provider Type</string>
     <string name="setting_page_search_providers">Search Providers</string>
     <string name="setting_page_search_result_size">Result Size</string>
+    <string name="setting_page_search_multi_strategy">Multi-Provider Strategy</string>
+    <string name="setting_page_search_multi_strategy_parallel">Parallel</string>
+    <string name="setting_page_search_multi_strategy_sequential">Sequential Fallback</string>
     <string name="setting_page_search_service">Search Providers</string>
     <string name="setting_page_search_service_desc">Configure search services</string>
     <string name="setting_page_search_title">Search Providers</string>
@@ -1557,6 +1587,11 @@
     <string name="setting_search_page_output_type">Output Type</string>
     <string name="setting_search_page_output_type_desc">searchResults: multiple sources, sourcedAnswer: synthesized answer</string>
     <string name="setting_search_page_grok_model_desc">Use an xAI model that supports web search</string>
+    <string name="setting_search_page_grok_enable_custom">Enable Custom</string>
+    <string name="setting_search_page_grok_enable_custom_desc">Customize the API endpoint and system prompt</string>
+    <string name="setting_search_page_grok_base_url">Base URL</string>
+    <string name="setting_search_page_grok_path">Path</string>
+    <string name="setting_search_page_grok_system_prompt">System Prompt</string>
     <string name="setting_search_page_password">Password</string>
     <string name="setting_search_page_search_depth">Search Depth</string>
     <string name="setting_search_page_search_depth_desc">Standard is faster/cheaper, Deep is more comprehensive</string>
@@ -1758,7 +1793,13 @@
     <string name="context_max_search_results_desc">Limit retained search results (0 = unlimited)</string>
     <string name="context_max_search_results_value">%d searches</string>
     <string name="context_max_search_results_unlimited">Unlimited</string>
-    
+
+    <!-- Image Archiving -->
+    <string name="context_image_archive_title">Image Archiving</string>
+    <string name="context_image_archive_disabled">Keep all images in context</string>
+    <string name="context_image_archive_after">Archive images after %d messages</string>
+    <string name="context_image_archive_desc">Images older than the threshold are replaced with OCR text to save context tokens. Requires an OCR model configured in Settings.</string>
+
     <!-- Context Refresh -->
     <string name="context_refresh_title">Message Summarization</string>
     <string name="context_refresh_button">Summarize Messages</string>

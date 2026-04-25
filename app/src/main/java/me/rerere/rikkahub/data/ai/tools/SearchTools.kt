@@ -15,6 +15,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.AssistantSearchMode
 import me.rerere.rikkahub.utils.JsonInstantPretty
+import me.rerere.search.MultiSearchStrategy
 import me.rerere.search.SearchService
 import me.rerere.search.SearchResult
 import me.rerere.search.SearchServiceOptions
@@ -214,25 +215,48 @@ object SearchTools {
                         primaryService.parameters
                     },
                     execute = { args ->
-                        val outcomes = supervisorScope {
-                            sanitizedIndices.map { index ->
-                                async {
-                                    val options = settings.searchServices.getOrElse(
-                                        index = index,
-                                        defaultValue = { SearchServiceOptions.DEFAULT }
-                                    )
-                                    val service = SearchService.getService(options)
-                                    val searchResult = runCatching {
-                                        service.search(
-                                            params = args.jsonObject,
-                                            commonOptions = settings.searchCommonOptions,
-                                            serviceOptions = options,
-                                        ).getOrThrow()
-                                    }
-                                    ProviderSearchOutcome(providerName = service.name, result = searchResult)
+                        val outcomes: List<ProviderSearchOutcome> =
+                            when (settings.searchCommonOptions.multiSearchStrategy) {
+                                MultiSearchStrategy.PARALLEL -> supervisorScope {
+                                    sanitizedIndices.map { index ->
+                                        async {
+                                            val options = settings.searchServices.getOrElse(
+                                                index = index,
+                                                defaultValue = { SearchServiceOptions.DEFAULT }
+                                            )
+                                            val service = SearchService.getService(options)
+                                            val searchResult = runCatching {
+                                                service.search(
+                                                    params = args.jsonObject,
+                                                    commonOptions = settings.searchCommonOptions,
+                                                    serviceOptions = options,
+                                                ).getOrThrow()
+                                            }.normalizeEmptyAsFailure()
+                                            ProviderSearchOutcome(providerName = service.name, result = searchResult)
+                                        }
+                                    }.awaitAll()
                                 }
-                            }.awaitAll()
-                        }
+                                MultiSearchStrategy.SEQUENTIAL -> {
+                                    val results = mutableListOf<ProviderSearchOutcome>()
+                                    for (index in sanitizedIndices) {
+                                        val options = settings.searchServices.getOrElse(
+                                            index = index,
+                                            defaultValue = { SearchServiceOptions.DEFAULT }
+                                        )
+                                        val service = SearchService.getService(options)
+                                        val searchResult = runCatching {
+                                            service.search(
+                                                params = args.jsonObject,
+                                                commonOptions = settings.searchCommonOptions,
+                                                serviceOptions = options,
+                                            ).getOrThrow()
+                                        }.normalizeEmptyAsFailure()
+                                        results += ProviderSearchOutcome(providerName = service.name, result = searchResult)
+                                        if (searchResult.isSuccess) break
+                                    }
+                                    results
+                                }
+                            }
 
                         val merged = mergeProviderSearchOutcomes(outcomes)
 
@@ -368,6 +392,21 @@ object SearchTools {
             }
         }
     }
+
+    private class EmptySearchResultException :
+        RuntimeException("Search provider returned no answer and no items")
+
+    private fun SearchResult.isMeaningful(): Boolean =
+        !answer.isNullOrBlank() || items.isNotEmpty()
+
+    private fun Result<SearchResult>.normalizeEmptyAsFailure(): Result<SearchResult> =
+        fold(
+            onSuccess = { result ->
+                if (result.isMeaningful()) Result.success(result)
+                else Result.failure(EmptySearchResultException())
+            },
+            onFailure = { Result.failure(it) }
+        )
 
     internal fun mergeProviderSearchOutcomes(outcomes: List<ProviderSearchOutcome>): MergedSearchResult {
         var mergedAnswer: String? = null

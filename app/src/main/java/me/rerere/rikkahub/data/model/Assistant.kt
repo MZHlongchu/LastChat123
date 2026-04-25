@@ -20,6 +20,26 @@ enum class ToolResultHistoryMode {
     DISCARD,
 }
 
+@Serializable
+enum class OverlayColorMode {
+    @SerialName("auto")
+    Auto,
+
+    @SerialName("manual")
+    Manual,
+}
+
+@Serializable
+data class BackgroundOverlaySettings(
+    val blurEnabled: Boolean = false,
+    val blurRadius: Float = 10f,
+    val overlayEnabled: Boolean = false,
+    val overlayOpacity: Float = 0.4f,
+    val overlayColorMode: OverlayColorMode = OverlayColorMode.Auto,
+    val overlayColorArgb: Long = 0xFF000000,
+    val overlayColorArgbLight: Long = 0xFFFFFFFF,
+)
+
 /**
  * Per-assistant UI settings. All nullable - null means "use global setting".
  */
@@ -96,6 +116,7 @@ data class Assistant(
     val enabledSkillIds: Set<Uuid> = emptySet(), // Skills enabled for this assistant
     val enabledModeIds: Set<Uuid> = emptySet(), // Modes enabled by default for new chats of this assistant
     val background: String? = null,
+    val backgroundOverlay: BackgroundOverlaySettings = BackgroundOverlaySettings(),
     val learningMode: Boolean = false,
     val enableSpontaneous: Boolean = false, // 是否启用自发消息
     val backgroundPrompt: String = "", // 后台任务提示词
@@ -106,6 +127,7 @@ data class Assistant(
     val maxHistoryMessages: Int? = null, // null = unlimited (use token budgeting only)
     val enableHistorySummarization: Boolean = false, // Generate summaries of pruned messages
     val maxSearchResultsRetained: Int? = null, // null = keep all, e.g. 2 = keep last 2 search results
+    val archiveImagesAfterMessageAge: Int? = null, // null = 关闭；N = 只保留最近 N 条消息中的图片，更旧的替换为 OCR 文字
     val enableContextRefresh: Boolean = false, // Show Summarize Messages button in chat input
     val autoRegenerateSummary: Boolean = false, // Automatically summarize when maxHistoryMessages reached
 

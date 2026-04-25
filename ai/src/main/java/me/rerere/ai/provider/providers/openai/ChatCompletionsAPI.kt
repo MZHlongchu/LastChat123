@@ -413,6 +413,15 @@ class ChatCompletionsAPI(
                         })
                     }
 
+                    "api.deepseek.com" -> {
+                        put("thinking", buildJsonObject {
+                            put("type", if (!level.isEnabled) "disabled" else "enabled")
+                        })
+                        if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                            put("reasoning_effort", level.effort)
+                        }
+                    }
+
                     else -> {
                         // OpenAI 官方
                         // reasoning_effort 支持 none/minimal/low/medium/high/xhigh（具体取决于模型）
@@ -456,6 +465,29 @@ class ChatCompletionsAPI(
         val lastUserMessageIndex = messages.indexOfLast { it.role == MessageRole.USER }
         val requireReasoningContentForToolCalls =
             modelId.contains("deepseek", ignoreCase = true) || modelId.contains("kimi", ignoreCase = true)
+
+        // Identify indices belonging to turns (between user messages) that contain tool calls.
+        // DeepSeek/Kimi require reasoning_content from ALL assistant messages in such turns
+        // to be passed back in subsequent requests, not just the current turn.
+        val toolCallTurnIndices = if (requireReasoningContentForToolCalls) {
+            val indices = mutableSetOf<Int>()
+            val userIndices = messages.mapIndexedNotNull { i, m ->
+                if (m.role == MessageRole.USER) i else null
+            }
+            for (i in userIndices.indices) {
+                val turnStart = if (i == 0) 0 else userIndices[i - 1] + 1
+                val turnEnd = userIndices[i]
+                val turnHasToolCalls = (turnStart until turnEnd).any { idx ->
+                    messages[idx].role == MessageRole.ASSISTANT && messages[idx].getToolCalls().isNotEmpty()
+                }
+                if (turnHasToolCalls) {
+                    (turnStart until turnEnd).forEach { indices.add(it) }
+                }
+            }
+            indices
+        } else {
+            emptySet()
+        }
 
         messages.forEachIndexed { index, message ->
             if (!message.isValidToUpload()) return@forEachIndexed
@@ -563,10 +595,14 @@ class ChatCompletionsAPI(
                         .filterIsInstance<UIMessagePart.Reasoning>()
                         .firstOrNull()
                         ?.reasoning
+                    val inToolCallTurn = index in toolCallTurnIndices
+                    val hasToolCalls = message.getToolCalls().isNotEmpty()
                     val shouldAttachReasoningContent =
                         message.role == MessageRole.ASSISTANT &&
-                            index > lastUserMessageIndex &&
-                            (!reasoning.isNullOrBlank() || (requireReasoningContentForToolCalls && message.getToolCalls().isNotEmpty()))
+                            (inToolCallTurn && (!reasoning.isNullOrBlank() || hasToolCalls) || (
+                                index > lastUserMessageIndex &&
+                                    (!reasoning.isNullOrBlank() || (requireReasoningContentForToolCalls && hasToolCalls))
+                                ))
                     if (shouldAttachReasoningContent) {
                         put("reasoning_content", reasoning ?: "")
                     }

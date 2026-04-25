@@ -64,6 +64,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.supportsBuiltInSearch
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.withoutBuiltInSearchTools
+import me.rerere.ai.ui.AskUserState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.finishReasoning
@@ -850,6 +851,19 @@ class ChatService(
             ChatLiveUpdateState.WAITING -> lastUserText.short() to lastUserText.long()
             ChatLiveUpdateState.INFERENCE -> lastUserText.short() to lastUserText.long()
             ChatLiveUpdateState.TOOL_CALL -> lastUserText.short() to lastUserText.long()
+            ChatLiveUpdateState.WAITING_FOR_ANSWER -> {
+                val pendingQuestion = conversation.currentMessages
+                    .asReversed()
+                    .asSequence()
+                    .flatMap { it.parts.asSequence() }
+                    .filterIsInstance<UIMessagePart.AskUser>()
+                    .firstOrNull { it.state == AskUserState.Pending }
+                    ?.let { part ->
+                        part.questions?.firstOrNull()?.question?.takeIf { it.isNotBlank() }
+                            ?: part.question.takeIf { it.isNotBlank() }
+                    }
+                (pendingQuestion ?: lastUserText).short() to (pendingQuestion ?: lastUserText).long()
+            }
             ChatLiveUpdateState.OUTPUT -> lastAssistantText.short() to lastAssistantText.long()
             ChatLiveUpdateState.DONE -> lastAssistantText.short() to lastAssistantText.long()
             ChatLiveUpdateState.ERROR -> {
@@ -1055,6 +1069,23 @@ class ChatService(
 
     // 初始化对话
     suspend fun initializeConversation(conversationId: Uuid): Boolean {
+        // If there is an active generation job, the in-memory StateFlow has the latest
+        // streaming data. Loading from DB would overwrite it with stale pre-generation state.
+        val activeJob = getGenerationJob(conversationId)
+        if (activeJob != null && activeJob.isActive) {
+            val inMemoryConversation = conversations[conversationId]?.value
+            if (inMemoryConversation != null && inMemoryConversation.messageNodes.isNotEmpty()) {
+                val settingsSnapshot = settingsStore.settingsFlow.value
+                val isGroupChat = settingsSnapshot.groupChatTemplates.any { it.id == inMemoryConversation.assistantId }
+                if (isGroupChat) {
+                    settingsStore.updateChatTarget(ChatTarget.GroupChat(inMemoryConversation.assistantId))
+                } else {
+                    settingsStore.updateAssistant(inMemoryConversation.assistantId)
+                }
+                return true
+            }
+        }
+
         val loadResult = conversationRepo.getConversationByIdCatching(conversationId)
         val loadError = loadResult.exceptionOrNull()
         if (loadError != null) {
@@ -1787,6 +1818,14 @@ class ChatService(
                         assistantId = assistant.id,
                         conversationId = conversation.id
                     ))
+                    if (assistant.localTools.contains(LocalToolOption.MemorySearch)) {
+                        addAll(
+                            me.rerere.rikkahub.data.ai.tools.MemoryTools.create(
+                                assistantId = assistant.id,
+                                memoryRepository = memoryRepository,
+                            )
+                        )
+                    }
                     if (hasEnabledLorebooksForAssistant) {
                         addAll(
                             LorebookTools.create(
@@ -2224,6 +2263,14 @@ class ChatService(
                 val hasWorkspaceFiles = seatAssistant.localTools.contains(LocalToolOption.WorkspaceFiles)
                 if (hasWorkspaceFiles) {
                     addAll(createWorkspaceFileTools(conversationId = conversation.id, settingsSnapshot = settings))
+                }
+                if (seatAssistant.localTools.contains(LocalToolOption.MemorySearch)) {
+                    addAll(
+                        me.rerere.rikkahub.data.ai.tools.MemoryTools.create(
+                            assistantId = seatAssistant.id,
+                            memoryRepository = memoryRepository,
+                        )
+                    )
                 }
                 if (seatAssistant.localTools.contains(LocalToolOption.PythonEngine)) {
                     add(

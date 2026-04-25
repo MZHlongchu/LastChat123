@@ -75,6 +75,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val GPT_5_5 = defineModel {
+        tokens("gpt", "5", "5")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val GEMINI_20_FLASH = defineModel {
         tokens("gemini", "2", "0", "flash")
         visionInput()
@@ -225,6 +231,16 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val DEEPSEEK_V4_FLASH = defineModel {
+        tokens("deepseek", "v", "4", "flash")
+        toolReasoningAbility()
+    }
+
+    private val DEEPSEEK_V4_PRO = defineModel {
+        tokens("deepseek", "v", "4", "pro")
+        toolReasoningAbility()
+    }
+
     private val DEEPSEEK_R1 = defineGroup {
         add(DEEPSEEK_R1_MODEL, DEEPSEEK_REASONER)
     }
@@ -246,6 +262,12 @@ object ModelRegistry {
 
     private val QWEN_3_5 = defineModel {
         tokens("qwen", "3", "5")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val QWEN_3_6 = defineModel {
+        tokens("qwen", "3", "6")
         visionInput()
         toolReasoningAbility()
     }
@@ -275,6 +297,12 @@ object ModelRegistry {
 
     private val KIMI_K2_5 = defineModel {
         tokens("kimi", "k", "2", "5")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val KIMI_K2_6 = defineModel {
+        tokens("kimi", "k", "2", "6")
         visionInput()
         toolReasoningAbility()
     }
@@ -357,6 +385,7 @@ object ModelRegistry {
         GPT_5_4,
         GPT_5_4_MINI,
         GPT_5_4_NANO,
+        GPT_5_5,
         GEMINI_20_FLASH,
         GEMINI_2_5_FLASH,
         GEMINI_2_5_PRO,
@@ -379,15 +408,19 @@ object ModelRegistry {
         DEEPSEEK_CHAT,
         DEEPSEEK_R1_MODEL,
         DEEPSEEK_REASONER,
+        DEEPSEEK_V4_FLASH,
+        DEEPSEEK_V4_PRO,
         DEEPSEEK_V3_1,
         DEEPSEEK_V3_2,
         QWEN_3,
         QWEN_3_5,
+        QWEN_3_6,
         DOUBAO_1_6,
         DOUBAO_1_8,
         GROK_4,
         KIMI_K2,
         KIMI_K2_5,
+        KIMI_K2_6,
         STEP_3,
         INTERN_S1,
         GLM_4_5,

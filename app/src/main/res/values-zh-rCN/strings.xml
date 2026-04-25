@@ -121,6 +121,7 @@
     <string name="notification_live_update_waiting">等待中</string>
     <string name="notification_live_update_inference">推理中</string>
     <string name="notification_live_update_tool_call">工具调用中</string>
+    <string name="notification_live_update_waiting_for_answer">待回答</string>
     <string name="notification_live_update_output">输出中</string>
     <string name="notification_live_update_done">输出完成</string>
     <string name="notification_live_update_error">生成异常</string>
@@ -173,6 +174,8 @@
     <string name="assistant_page_local_tools_scheduled_task_manager_desc">允许助手创建、编辑和删除定时任务（需要用户确认）</string>
     <string name="assistant_page_local_tools_ask_user_title">询问用户</string>
     <string name="assistant_page_local_tools_ask_user_desc">允许助手在不确定时向你提问</string>
+    <string name="assistant_page_local_tools_memory_search_title">记忆搜索</string>
+    <string name="assistant_page_local_tools_memory_search_desc">允许助手在对话中按关键词主动查阅已保存的记忆。</string>
     <string name="context_refresh_no_summarizer">请先在设置中配置上下文总结模型（或聊天模型）</string>
     <string name="context_dynamic_pruning_title">动态裁剪消息</string>
     <string name="context_dynamic_pruning_desc">仅保留最近消息进入上下文</string>
@@ -181,6 +184,10 @@
     <string name="context_manual_limit_input_label">消息条数</string>
     <string name="context_manual_limit_input_hint">请输入数字，最小为 1</string>
     <string name="context_manual_limit_input_error">请输入可处理的整数，且大于等于 1</string>
+    <string name="context_image_archive_title">图片归档</string>
+    <string name="context_image_archive_disabled">保留所有图片上下文</string>
+    <string name="context_image_archive_after">超过 %d 条消息后归档图片</string>
+    <string name="context_image_archive_desc">超出阈值的旧图片将替换为 OCR 文字以节省上下文 Token。需要在设置中配置 OCR 模型。</string>
 
     <string name="mcp_tool_approval_prompt">是否允许执行 %1$s</string>
     <string name="mcp_tool_approval_title">工具审批</string>
@@ -201,6 +208,7 @@
     <string name="ask_user_wizard_progress">问题 %1$d / %2$d</string>
     <string name="ask_user_wizard_skip">跳过</string>
     <string name="ask_user_wizard_next">下一个</string>
+    <string name="ask_user_wizard_previous">上一个</string>
     <string name="tool_approval_workspace_list">工作区：列出文件</string>
     <string name="tool_approval_workspace_read_file">工作区：读取文件</string>
     <string name="tool_approval_workspace_write_file">工作区：写入文件</string>
@@ -294,6 +302,14 @@
     <string name="developer_option_ipv6_probe_http_title">外网 IPv6（6.ipw.cn）</string>
     <string name="developer_option_ipv6_probe_system_title">默认网络 IPv6</string>
     <string name="developer_option_ipv6_probe_not_found">未检测到 IPv6</string>
+    <string name="developer_option_manual_update_title">手动检查更新</string>
+    <string name="developer_option_manual_update_desc">从 GitHub API 或 Cloudflare 缓存检查更新。</string>
+    <string name="developer_option_manual_update_source_github">GitHub</string>
+    <string name="developer_option_manual_update_source_cloudflare">Cloudflare</string>
+    <string name="developer_option_manual_update_action">检查</string>
+    <string name="developer_option_manual_update_loading">检查中…</string>
+    <string name="developer_option_manual_update_no_result">未找到发布版本</string>
+    <string name="developer_option_manual_update_error_prefix">错误：%1$s</string>
 
     <string name="backup_page_object_storage_backup">对象存储备份</string>
     <string name="backup_page_object_storage_backup_files">对象存储备份文件列表</string>
@@ -371,4 +387,26 @@
     <string name="notification_web_server_running">本地浏览器访问正在运行</string>
     <string name="notification_web_server_error">网络服务器出现故障</string>
     <string name="setting_search_page_alias">别名（可选）</string>
+    <string name="setting_search_page_grok_enable_custom">启用自定义</string>
+    <string name="setting_search_page_grok_enable_custom_desc">自定义 API 端点和系统提示词</string>
+    <string name="setting_search_page_grok_base_url">Base URL</string>
+    <string name="setting_search_page_grok_path">路径</string>
+    <string name="setting_search_page_grok_system_prompt">系统提示词</string>
+    <string name="setting_page_search_multi_strategy">多选策略</string>
+    <string name="setting_page_search_multi_strategy_parallel">并行搜索</string>
+    <string name="setting_page_search_multi_strategy_sequential">顺序回退</string>
+    <string name="assistant_page_background_blur">背景模糊</string>
+    <string name="assistant_page_background_blur_desc">对背景图片应用模糊效果</string>
+    <string name="assistant_page_blur_radius">模糊半径</string>
+    <string name="assistant_page_color_overlay">颜色遮罩</string>
+    <string name="assistant_page_color_overlay_desc">添加颜色遮罩以提高可读性</string>
+    <string name="assistant_page_overlay_opacity">遮罩不透明度</string>
+    <string name="assistant_page_overlay_color_auto">自动</string>
+    <string name="assistant_page_overlay_color_manual">手动</string>
+    <string name="assistant_page_overlay_dark_color">深色模式</string>
+    <string name="assistant_page_overlay_light_color">浅色模式</string>
+    <string name="color_picker_recommended">推荐颜色</string>
+    <string name="color_picker_recent">最近使用</string>
+    <string name="setting_display_page_hide_suggestions_overlap_title">遮挡消息时自动隐藏建议</string>
+    <string name="setting_display_page_hide_suggestions_overlap_desc">当聊天建议覆盖到消息文本时淡出</string>
 </resources>

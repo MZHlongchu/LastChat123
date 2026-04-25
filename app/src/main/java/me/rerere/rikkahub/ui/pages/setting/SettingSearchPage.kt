@@ -4,6 +4,11 @@ import android.content.Context
 import androidx.annotation.StringRes
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
@@ -104,6 +109,7 @@ import me.rerere.rikkahub.ui.hooks.HapticPattern
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
 import me.rerere.rikkahub.ui.theme.AppShapes
 import me.rerere.rikkahub.utils.plus
+import me.rerere.search.MultiSearchStrategy
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
@@ -1098,6 +1104,35 @@ private fun CommonOptionsDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                FormItem(
+                    label = {
+                        Text(stringResource(R.string.setting_page_search_multi_strategy))
+                    }
+                ) {
+                    val strategies = MultiSearchStrategy.entries
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        strategies.forEachIndexed { index, strategy ->
+                            SegmentedButton(
+                                shape = SegmentedButtonDefaults.itemShape(index, strategies.size),
+                                selected = commonOptions.multiSearchStrategy == strategy,
+                                onClick = {
+                                    commonOptions = commonOptions.copy(multiSearchStrategy = strategy)
+                                    onUpdate(commonOptions)
+                                },
+                                label = {
+                                    Text(
+                                        stringResource(
+                                            if (strategy == MultiSearchStrategy.PARALLEL)
+                                                R.string.setting_page_search_multi_strategy_parallel
+                                            else
+                                                R.string.setting_page_search_multi_strategy_sequential
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1465,6 +1500,53 @@ private fun GrokOptions(
                         }
                     )
                 }
+            }
+        }
+    }
+
+    FormItem(
+        label = { Text(stringResource(R.string.setting_search_page_grok_enable_custom)) },
+        description = { Text(stringResource(R.string.setting_search_page_grok_enable_custom_desc)) },
+        tail = {
+            HapticSwitch(
+                checked = options.enableCustom,
+                onCheckedChange = { onUpdateOptions(options.copy(enableCustom = it)) }
+            )
+        }
+    )
+
+    AnimatedVisibility(
+        visible = options.enableCustom,
+        enter = expandVertically(animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f)) +
+                fadeIn(animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)),
+        exit = shrinkVertically(animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)) +
+               fadeOut(),
+    ) {
+        Column {
+            FormItem(label = { Text(stringResource(R.string.setting_search_page_grok_base_url)) }) {
+                OutlinedTextField(
+                    value = options.customBaseUrl,
+                    onValueChange = { onUpdateOptions(options.copy(customBaseUrl = it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("https://api.x.ai/v1") }
+                )
+            }
+            FormItem(label = { Text(stringResource(R.string.setting_search_page_grok_path)) }) {
+                OutlinedTextField(
+                    value = options.customPath,
+                    onValueChange = { onUpdateOptions(options.copy(customPath = it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("/responses") }
+                )
+            }
+            FormItem(label = { Text(stringResource(R.string.setting_search_page_grok_system_prompt)) }) {
+                OutlinedTextField(
+                    value = options.customSystemPrompt,
+                    onValueChange = { onUpdateOptions(options.copy(customSystemPrompt = it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 6
+                )
             }
         }
     }

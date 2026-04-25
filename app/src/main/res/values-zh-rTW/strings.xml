@@ -31,6 +31,18 @@
   <string name="assistant_page_chaotic">混亂 (危險)</string>
   <string name="assistant_page_chat_background">聊天背景</string>
   <string name="assistant_page_chat_background_desc">設定助手聊天頁面的背景圖片</string>
+  <string name="assistant_page_background_blur">背景模糊</string>
+  <string name="assistant_page_background_blur_desc">對背景圖片套用模糊效果</string>
+  <string name="assistant_page_blur_radius">模糊半徑</string>
+  <string name="assistant_page_color_overlay">顏色遮罩</string>
+  <string name="assistant_page_color_overlay_desc">新增顏色遮罩以提高可讀性</string>
+  <string name="assistant_page_overlay_opacity">遮罩不透明度</string>
+  <string name="assistant_page_overlay_color_auto">自動</string>
+  <string name="assistant_page_overlay_color_manual">手動</string>
+  <string name="assistant_page_overlay_dark_color">深色模式</string>
+  <string name="assistant_page_overlay_light_color">淺色模式</string>
+  <string name="color_picker_recommended">推薦顏色</string>
+  <string name="color_picker_recent">最近使用</string>
   <string name="assistant_page_chat_model">聊天模型</string>
   <string name="assistant_page_chat_model_desc">設定助手的預設聊天模型，如果不設定，則使用全域預設聊天模型</string>
   <string name="assistant_page_clone">複製</string>
@@ -288,6 +300,7 @@
   <string name="ask_user_wizard_progress">問題 %1$d / %2$d</string>
   <string name="ask_user_wizard_skip">跳過</string>
   <string name="ask_user_wizard_next">下一個</string>
+  <string name="ask_user_wizard_previous">上一個</string>
   <string name="tool_approval_view_params">查看參數</string>
   <string name="tool_approval_workspace_list">工作區：列出檔案</string>
   <string name="tool_approval_workspace_read_file">工作區：讀取檔案</string>
@@ -538,6 +551,8 @@
   <string name="setting_display_page_message_jumper_position_title">訊息跳轉位置</string>
   <string name="setting_display_page_notification_message_generated">在訊息產生後啟用通知</string>
   <string name="setting_display_page_notification_message_generated_desc">當應用程式不在前景時，若產生新訊息則顯示通知</string>
+  <string name="setting_display_page_hide_suggestions_overlap_title">遮擋訊息時自動隱藏建議</string>
+  <string name="setting_display_page_hide_suggestions_overlap_desc">當聊天建議覆蓋到訊息文字時淡出</string>
   <string name="setting_display_page_show_message_jumper_desc">在捲動聊天列表時，在右側顯示快速跳轉按鈕</string>
   <string name="setting_display_page_show_message_jumper_title">消息導航按鈕</string>
   <string name="setting_display_page_show_model_name_desc">在消息前顯示助手名稱和時間</string>
@@ -839,6 +854,9 @@
   <string name="setting_page_search_provider_type">提供商類型</string>
   <string name="setting_page_search_providers">搜尋提供商</string>
   <string name="setting_page_search_result_size">結果數量</string>
+  <string name="setting_page_search_multi_strategy">多選策略</string>
+  <string name="setting_page_search_multi_strategy_parallel">並行搜尋</string>
+  <string name="setting_page_search_multi_strategy_sequential">順序回退</string>
   <string name="setting_page_search_service">搜尋服務</string>
   <string name="setting_page_search_service_desc">設定搜尋服務</string>
   <string name="setting_page_search_title">搜尋服務</string>
@@ -1120,6 +1138,7 @@
   <string name="notification_live_update_waiting">等待中</string>
   <string name="notification_live_update_inference">推理中</string>
   <string name="notification_live_update_tool_call">工具調用中</string>
+  <string name="notification_live_update_waiting_for_answer">待回答</string>
   <string name="notification_live_update_output">輸出中</string>
   <string name="notification_live_update_done">輸出完成</string>
   <string name="notification_live_update_error">生成異常</string>
@@ -1439,6 +1458,11 @@
   <string name="setting_search_page_output_type">輸出類型</string>
   <string name="setting_search_page_output_type_desc">searchResults：多來源結果；sourcedAnswer：綜合答案</string>
   <string name="setting_search_page_grok_model_desc">使用支援網路搜尋的 xAI 模型</string>
+  <string name="setting_search_page_grok_enable_custom">啟用自訂</string>
+  <string name="setting_search_page_grok_enable_custom_desc">自訂 API 端點與系統提示詞</string>
+  <string name="setting_search_page_grok_base_url">Base URL</string>
+  <string name="setting_search_page_grok_path">路徑</string>
+  <string name="setting_search_page_grok_system_prompt">系統提示詞</string>
   <string name="setting_search_page_password">密碼</string>
   <string name="setting_search_page_search_depth">搜索深度</string>
   <string name="setting_search_page_search_depth_desc">標準更快/更便宜，深度更全面</string>
@@ -1494,6 +1518,8 @@
   <string name="assistant_page_local_tools_workspace_files_desc">允許助手讀寫目前對話的工作區檔案。需要先授予工作區根目錄權限。</string>
   <string name="assistant_page_local_tools_lorebooks_editor_title">世界書編輯</string>
   <string name="assistant_page_local_tools_lorebooks_editor_desc">允許助手編輯已啟用的世界書條目（新增/修改/刪除）。工具變更會寫入歷史，可撤銷。</string>
+  <string name="assistant_page_local_tools_memory_search_title">記憶搜索</string>
+  <string name="assistant_page_local_tools_memory_search_desc">允許助手在對話中按關鍵字主動查閱已儲存的記憶。</string>
   <string name="assistant_page_local_tools_scheduled_task_manager_title">定時任務管理</string>
   <string name="assistant_page_local_tools_scheduled_task_manager_desc">允許助手建立、編輯和刪除定時任務（需要使用者確認）</string>
   <string name="assistant_page_local_tools_ask_user_title">詢問使用者</string>
@@ -1519,6 +1545,14 @@
   <string name="developer_option_ipv6_probe_http_title">外網 IPv6（6.ipw.cn）</string>
   <string name="developer_option_ipv6_probe_system_title">預設網路 IPv6</string>
   <string name="developer_option_ipv6_probe_not_found">未偵測到 IPv6</string>
+  <string name="developer_option_manual_update_title">手動檢查更新</string>
+  <string name="developer_option_manual_update_desc">從 GitHub API 或 Cloudflare 快取檢查更新。</string>
+  <string name="developer_option_manual_update_source_github">GitHub</string>
+  <string name="developer_option_manual_update_source_cloudflare">Cloudflare</string>
+  <string name="developer_option_manual_update_action">檢查</string>
+  <string name="developer_option_manual_update_loading">檢查中…</string>
+  <string name="developer_option_manual_update_no_result">未找到發佈版本</string>
+  <string name="developer_option_manual_update_error_prefix">錯誤：%1$s</string>
   <string name="a11y_messages">消息</string>
   <string name="a11y_chat_options">對話選項</string>
   <string name="a11y_make_normal_chat">轉為普通對話</string>
@@ -1674,6 +1708,7 @@
   <string name="setting_request_logs_enable_developer_mode_first">需要先啟用開發者模式。</string>
   <string name="request_logs_empty">還沒有請求日誌</string>
   <string name="request_logs_filter_all">全部</string>
+  <string name="request_logs_filter_error">僅錯誤</string>
   <string name="request_logs_export_empty">暫無可匯出的日誌</string>
   <string name="request_logs_export_failed">匯出失敗：%1$s</string>
   <string name="request_log_not_found">未找到日誌</string>
@@ -1752,6 +1787,12 @@
   <string name="context_max_search_results_desc">限制保留的搜尋結果（0 = 無限制）</string>
   <string name="context_max_search_results_value">%d 次搜尋</string>
   <string name="context_max_search_results_unlimited">無限制</string>
+
+  <!-- Image Archiving -->
+  <string name="context_image_archive_title">圖片歸檔</string>
+  <string name="context_image_archive_disabled">保留所有圖片上下文</string>
+  <string name="context_image_archive_after">超過 %d 則訊息後歸檔圖片</string>
+  <string name="context_image_archive_desc">超出閾值的舊圖片將替換為 OCR 文字以節省上下文 Token。需要在設定中配置 OCR 模型。</string>
 
   <!-- Context Refresh -->
   <string name="context_refresh_title">對話摘要</string>
