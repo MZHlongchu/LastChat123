@@ -27,6 +27,8 @@ import kotlinx.serialization.json.booleanOrNull
 import me.rerere.rikkahub.R
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.normalizeProviderApiKeys
+import me.rerere.ai.provider.syncEnabledApiKeysToLegacyField
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_LEARNING_MODE_PROMPT
@@ -37,6 +39,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantSearchMode
 import me.rerere.rikkahub.data.model.Avatar
@@ -129,6 +132,7 @@ private val Context.settingsStore by preferencesDataStore(
         listOf(
             PreferenceStoreV1Migration(),
             PreferenceStoreV2Migration(),
+            PreferenceStoreV3Migration(),
         )
     }
 )
@@ -593,7 +597,7 @@ class SettingsStore(
                         is ProviderSetting.Claude -> provider.copy(
                             models = provider.models.distinctBy { model -> model.id }
                         )
-                    }
+                    }.normalizeProviderApiKeys()
                 },
                 assistants = dedupedAssistants,
                 skillFolders = dedupedSkillFolders,
@@ -656,6 +660,9 @@ class SettingsStore(
             }
 	        val finalSettingsToSave = settingsToSaveWithReboundSearchIndices.copy(
                 assistants = normalizedAssistants,
+                providers = settingsToSaveWithReboundSearchIndices.providers.map { provider ->
+                    provider.normalizeProviderApiKeys().syncEnabledApiKeysToLegacyField()
+                },
 	            displaySetting = settingsToSaveWithReboundSearchIndices.displaySetting.coerceForConflicts(),
                 mcpToolCallTimeoutSeconds = settingsToSaveWithReboundSearchIndices.mcpToolCallTimeoutSeconds.coerceAtLeast(1),
                 http429MaxRetries = settingsToSaveWithReboundSearchIndices.http429MaxRetries.coerceIn(0, 10),
@@ -666,7 +673,7 @@ class SettingsStore(
 
         settingsFlow.value = finalSettingsToSave
         dataStore.edit { preferences ->
-            preferences[VERSION] = 2
+            preferences[VERSION] = 3
             preferences[DYNAMIC_COLOR] = finalSettingsToSave.dynamicColor
             preferences[THEME_ID] = finalSettingsToSave.themeId
             preferences[DEVELOPER_MODE] = finalSettingsToSave.developerMode
@@ -1204,6 +1211,36 @@ fun List<ProviderSetting>.findModelById(uuid: Uuid): Model? {
 
 fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
+}
+
+fun Model.findQuotaOwner(allModels: List<Model>): Model? {
+    return findQuotaGroup(allModels).firstOrNull { model -> model.quota?.enabled == true }
+}
+
+fun Model.findQuotaGroup(allModels: List<Model>): List<Model> {
+    val knownIds = allModels.map { it.id }.toSet()
+    val relatedModelIds = mutableSetOf(this.id)
+    var changed: Boolean
+
+    do {
+        changed = false
+        allModels.forEach { model ->
+            val sharedIds = model.quota?.sharedModelIds.orEmpty().filter { it in knownIds }
+            val isConnected = model.id in relatedModelIds || sharedIds.any { it in relatedModelIds }
+            if (isConnected) {
+                if (relatedModelIds.add(model.id)) {
+                    changed = true
+                }
+                sharedIds.forEach { sharedId ->
+                    if (relatedModelIds.add(sharedId)) {
+                        changed = true
+                    }
+                }
+            }
+        }
+    } while (changed)
+
+    return allModels.filter { it.id in relatedModelIds }
 }
 
 fun Settings.getCurrentAssistant(): Assistant {

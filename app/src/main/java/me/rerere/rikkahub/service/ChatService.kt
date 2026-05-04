@@ -126,6 +126,8 @@ import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.LorebookEntryRevisionRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.ModelQuotaRepository
+import me.rerere.rikkahub.data.repository.QuotaUsageResult
 import me.rerere.rikkahub.data.repository.ToolResultArchiveRepository
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.JsonInstantPretty
@@ -198,6 +200,7 @@ class ChatService(
     private val localTools: LocalTools,
     private val okHttpClient: OkHttpClient,
     val mcpManager: McpManager,
+    private val modelQuotaRepo: ModelQuotaRepository,
 ) {
     // 存储每个对话的状态
     private val conversations = ConcurrentHashMap<Uuid, MutableStateFlow<Conversation>>()
@@ -312,6 +315,10 @@ class ChatService(
     // 生成完成流
     private val _generationDoneFlow = MutableSharedFlow<Uuid>()
     val generationDoneFlow: SharedFlow<Uuid> = _generationDoneFlow.asSharedFlow()
+
+    // 配额警告流
+    private val _quotaWarningFlow = MutableSharedFlow<QuotaUsageResult>()
+    val quotaWarningFlow: SharedFlow<QuotaUsageResult> = _quotaWarningFlow.asSharedFlow()
 
     // 前台状态管理
     private val _isForeground = MutableStateFlow(false)
@@ -929,11 +936,17 @@ class ChatService(
     // 获取对话的StateFlow
     fun getConversationFlow(conversationId: Uuid): StateFlow<Conversation> {
         val settings = settingsStore.settingsFlow.value
+        val assistant = when (val target = settings.chatTarget) {
+            is ChatTarget.Assistant -> settings.getAssistantById(target.assistantId)
+            is ChatTarget.GroupChat -> null
+        } ?: settings.getCurrentAssistant()
         return conversations.getOrPut(conversationId) {
             MutableStateFlow(
                 Conversation.ofId(
                     id = conversationId,
                     assistantId = settings.chatTarget.id
+                ).copy(
+                    enabledModeIds = assistant.enabledModeIds
                 )
             )
         }
@@ -1136,7 +1149,9 @@ class ChatService(
                 is ChatTarget.Assistant -> {
                     val assistant = currentSettings.getAssistantById(target.assistantId)
                         ?: currentSettings.getCurrentAssistant()
-                    baseConversation.updateCurrentMessages(assistant.presetMessages)
+                    baseConversation.updateCurrentMessages(assistant.presetMessages).copy(
+                        enabledModeIds = assistant.enabledModeIds,
+                    )
                 }
 
                 is ChatTarget.GroupChat -> baseConversation
@@ -1385,6 +1400,21 @@ class ChatService(
                     Log.w(TAG, "sendMessage: recordDailyActivity failed (${e.message})", e)
                 }
 
+                // Pre-send quota check
+                try {
+                    val settings = settingsStore.settingsFlow.value
+                    val currentModel = settings.getCurrentChatModel()
+                    if (currentModel != null) {
+                        modelQuotaRepo.checkAndAutoResetForProviders(currentModel, settings.providers)
+                        val quotaResult = modelQuotaRepo.getQuotaUsageForProviders(currentModel, settings.providers)
+                        if (quotaResult != null && quotaResult.isOverLimit) {
+                            _quotaWarningFlow.emit(quotaResult)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "sendMessage: quota check failed (${e.message})", e)
+                }
+
                 // 开始补全
                 if(answer){
                     handleMessageComplete(
@@ -1584,6 +1614,7 @@ class ChatService(
                     it
                 }
             }
+            val quotaBaselineMessages = conversation.currentMessages
 
             val persistentConversationId =
                 conversationId.takeIf { !temporaryConversations.contains(conversationId) }
@@ -1826,6 +1857,15 @@ class ChatService(
                             )
                         )
                     }
+                    if (assistant.localTools.contains(LocalToolOption.ChatSearch)) {
+                        addAll(
+                            me.rerere.rikkahub.data.ai.tools.ChatSearchTools.create(
+                                assistantId = assistant.id,
+                                conversationId = conversation.id,
+                                conversationRepo = conversationRepo,
+                            )
+                        )
+                    }
                     if (hasEnabledLorebooksForAssistant) {
                         addAll(
                             LorebookTools.create(
@@ -1918,6 +1958,38 @@ class ChatService(
                     updateAt = Instant.now()
                 )
                 updateConversation(conversationId, updatedConversation)
+
+                // Record quota usage after generation
+                if (cause == null) {
+                    try {
+                        val tokenUsage = calculateQuotaTokenUsageDelta(
+                            baselineMessages = quotaBaselineMessages,
+                            finalMessages = updatedConversation.currentMessages,
+                        )
+                        val chatModelId = updatedConversation.currentMessages
+                            .lastOrNull { it.role == MessageRole.ASSISTANT && it.modelId != null }
+                            ?.modelId
+                            ?: settings.getCurrentChatModel()?.id
+                        val currentModel = settings.getCurrentChatModel()
+                        if (!tokenUsage.isEmpty && chatModelId != null && currentModel != null) {
+                            modelQuotaRepo.recordUsage(
+                                modelId = chatModelId,
+                                inputTokens = tokenUsage.inputTokens,
+                                outputTokens = tokenUsage.outputTokens,
+                                cachedTokens = tokenUsage.cachedTokens,
+                            )
+                            val updatedQuota = modelQuotaRepo.getQuotaUsageForProviders(
+                                currentModel,
+                                settings.providers
+                            )
+                            if (updatedQuota != null && updatedQuota.isAtReminder) {
+                                _quotaWarningFlow.emit(updatedQuota)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "quota recording failed (${e.message})", e)
+                    }
+                }
 
                 val generationFinishedNormally = cause == null
                 if (generationFinishedNormally) {
@@ -2269,6 +2341,15 @@ class ChatService(
                         me.rerere.rikkahub.data.ai.tools.MemoryTools.create(
                             assistantId = seatAssistant.id,
                             memoryRepository = memoryRepository,
+                        )
+                    )
+                }
+                if (seatAssistant.localTools.contains(LocalToolOption.ChatSearch)) {
+                    addAll(
+                        me.rerere.rikkahub.data.ai.tools.ChatSearchTools.create(
+                            assistantId = seatAssistant.id,
+                            conversationId = conversation.id,
+                            conversationRepo = conversationRepo,
                         )
                     )
                 }

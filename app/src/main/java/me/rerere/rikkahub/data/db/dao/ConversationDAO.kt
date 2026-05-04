@@ -21,9 +21,23 @@ data class ConversationNodesScanRow(
     val nodes: String,
 )
 
+data class ConversationHistoryScanRow(
+    val id: String,
+    val createAt: Long,
+    val nodes: String,
+)
+
 data class ConversationSearchIndexRow(
     val id: String,
     val nodes: String,
+)
+
+data class ChatSearchResultRow(
+    val id: String,
+    val title: String,
+    val searchText: String,
+    val updateAt: Long,
+    val isPinned: Boolean,
 )
 
 data class ConversationMonthCount(
@@ -66,6 +80,21 @@ interface ConversationDAO {
     @Query("SELECT id, assistant_id as assistantId, nodes FROM conversationentity ORDER BY update_at DESC LIMIT :limit OFFSET :offset")
     suspend fun getNodesBatchForScan(limit: Int, offset: Int): List<ConversationNodesScanRow>
 
+    @Query("""
+        SELECT
+            id,
+            create_at as createAt,
+            CASE WHEN length(nodes) <= :maxNodeChars THEN nodes ELSE '' END as nodes
+        FROM conversationentity
+        ORDER BY update_at DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getHistoryBatchForStats(
+        limit: Int,
+        offset: Int,
+        maxNodeChars: Int
+    ): List<ConversationHistoryScanRow>
+
     @Query("SELECT * FROM conversationentity WHERE (title LIKE '%' || :searchText || '%' OR search_text LIKE '%' || :searchText || '%') ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversations(searchText: String): Flow<List<ConversationEntity>>
 
@@ -77,6 +106,9 @@ interface ConversationDAO {
 
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, is_consolidated as isConsolidated FROM conversationentity WHERE assistant_id = :assistantId AND (title LIKE '%' || :searchText || '%' OR search_text LIKE '%' || :searchText || '%') ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversationsOfAssistantPaging(assistantId: String, searchText: String): PagingSource<Int, LightConversationEntity>
+
+    @Query("SELECT id, title, search_text as searchText, update_at as updateAt, is_pinned as isPinned FROM conversationentity WHERE assistant_id = :assistantId AND search_text LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
+    suspend fun searchChatContentOfAssistant(assistantId: String, searchText: String, limit: Int): List<ChatSearchResultRow>
 
     @Query("SELECT id, nodes FROM conversationentity WHERE search_text_version < :version ORDER BY update_at DESC LIMIT :limit")
     suspend fun getSearchIndexBackfillBatch(version: Int, limit: Int): List<ConversationSearchIndexRow>
@@ -135,6 +167,9 @@ interface ConversationDAO {
     // Stats queries for MenuVM optimization
     @Query("SELECT COUNT(*) FROM conversationentity")
     fun getConversationCountFlow(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM conversationentity WHERE create_at >= :startMs AND create_at < :endMs")
+    fun getConversationCountCreatedBetweenFlow(startMs: Long, endMs: Long): Flow<Int>
 
     @Query("SELECT DISTINCT date(update_at / 1000, 'unixepoch', 'localtime') as updateDate FROM conversationentity ORDER BY updateDate DESC")
     fun getDistinctUpdateDatesFlow(): Flow<List<String>>

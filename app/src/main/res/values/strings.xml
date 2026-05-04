@@ -76,6 +76,7 @@
     <string name="request_log_source_tool_result_rag">Tool Result Retrieval</string>
     <string name="request_log_source_translation">Translation</string>
     <string name="request_log_source_ocr">OCR</string>
+    <string name="request_log_source_document_summary">Document Summary</string>
     <string name="request_log_source_scheduled_message">Scheduled Message</string>
     <string name="request_log_source_spontaneous">Spontaneous</string>
     <string name="request_log_source_model_name_generation">Model Name Generation</string>
@@ -212,6 +213,8 @@
     <string name="assistant_page_local_tools_lorebooks_editor_desc">Allow assistant to create/update/delete entries in enabled lorebooks (undoable via history).</string>
     <string name="assistant_page_local_tools_memory_search_title">Memory Search</string>
     <string name="assistant_page_local_tools_memory_search_desc">Allow assistant to look up its saved memories by keyword during the conversation.</string>
+    <string name="assistant_page_local_tools_chat_search_title">Chat Search</string>
+    <string name="assistant_page_local_tools_chat_search_desc">Allow assistant to search past chat conversations by keyword.</string>
     <string name="assistant_page_local_tools_scheduled_task_manager_title">Scheduled Task Manager</string>
     <string name="assistant_page_local_tools_scheduled_task_manager_desc">Allow assistant to create, update, and delete scheduled tasks (requires approval)</string>
     <string name="assistant_page_local_tools_ask_user_title">Ask User</string>
@@ -866,7 +869,7 @@
     <string name="setting_page_built_in_tools_url_context">URL Context</string>
     <string name="setting_page_built_in_tools_url_context_desc">Enable URL content processing</string>
     <string name="setting_page_built_in_tools_grok_web_search">Grok Web Search</string>
-    <string name="setting_page_built_in_tools_grok_web_search_desc">Enable xAI built-in web search (api.x.ai only)</string>
+    <string name="setting_page_built_in_tools_grok_web_search_desc">Enable xAI built-in web search (third-party endpoints may not support this)</string>
     <string name="setting_page_built_in_tools_grok_x_search">Grok X Search</string>
     <string name="setting_page_built_in_tools_grok_x_search_desc">Enable xAI built-in X (Twitter) search</string>
     <string name="setting_page_chat_settings">Chat Settings</string>
@@ -1109,6 +1112,26 @@
     <string name="setting_provider_page_api_base_url">API Base Url</string>
     <string name="setting_provider_page_api_key">API Key</string>
     <string name="setting_provider_page_api_path">API Path</string>
+    <string name="setting_provider_page_manage_multi_keys_with_count">Manage Keys (%1$d/%2$d enabled)</string>
+    <string name="setting_provider_page_multi_key_add">Add Key</string>
+    <string name="setting_provider_page_multi_key_alias">Alias</string>
+    <string name="setting_provider_page_multi_key_default_alias">Key %1$d</string>
+    <string name="setting_provider_page_multi_key_edit_title">Edit Key</string>
+    <string name="setting_provider_page_multi_key_empty">No keys yet. Add one or import from the clipboard.</string>
+    <string name="setting_provider_page_multi_key_import">Import</string>
+    <string name="setting_provider_page_multi_key_import_confirm">Import</string>
+    <string name="setting_provider_page_multi_key_import_empty">No new keys found</string>
+    <string name="setting_provider_page_multi_key_import_hint">Comma, space, or line breaks are all supported. Duplicates are skipped.</string>
+    <string name="setting_provider_page_multi_key_import_input">Paste keys</string>
+    <string name="setting_provider_page_multi_key_import_title">Import Keys</string>
+    <string name="setting_provider_page_multi_key_imported">Imported %1$d keys</string>
+    <string name="setting_provider_page_multi_key_manager">Key Manager</string>
+    <string name="setting_provider_page_multi_key_mode">Multi-key mode</string>
+    <string name="setting_provider_page_multi_key_mode_desc">Manage several keys separately and choose which ones are used.</string>
+    <string name="setting_provider_page_multi_key_strategy_random">Random</string>
+    <string name="setting_provider_page_multi_key_strategy_round_robin">Round robin</string>
+    <string name="setting_provider_page_multi_key_summary">%1$d of %2$d keys enabled</string>
+    <string name="setting_provider_page_multi_key_test_needs_model">Add a chat model before testing individual keys.</string>
     <string name="setting_provider_page_balance_api_path">Balance API Path</string>
     <string name="setting_provider_page_balance_info">Get Balance</string>
     <string name="setting_provider_page_balance_json_key">Balance JSON Key</string>
@@ -1760,6 +1783,7 @@
     <string name="modes_picker_none">No modes configured</string>
     <string name="modes_page_default_enabled">Enable by default</string>
     <string name="modes_page_default_enabled_desc">Automatically enable for new chats</string>
+    <string name="modes_page_config_default_assistants">Configure default-enabled assistants (%1$d/%2$d)</string>
     <string name="lorebook_entry_deleted">Entry %s deleted</string>
 
     <!-- Lorebooks Picker -->
@@ -1799,6 +1823,12 @@
     <string name="context_image_archive_disabled">Keep all images in context</string>
     <string name="context_image_archive_after">Archive images after %d messages</string>
     <string name="context_image_archive_desc">Images older than the threshold are replaced with OCR text to save context tokens. Requires an OCR model configured in Settings.</string>
+
+    <!-- Document Archiving -->
+    <string name="context_doc_archive_title">File Archiving</string>
+    <string name="context_doc_archive_disabled">Keep all file contents in context</string>
+    <string name="context_doc_archive_after">Archive files after %d messages</string>
+    <string name="context_doc_archive_desc">Files older than the threshold are replaced with AI summaries to save context tokens. Summaries are pre-generated in the background. Requires a context summarizer model.</string>
 
     <!-- Context Refresh -->
     <string name="context_refresh_title">Message Summarization</string>
@@ -2007,5 +2037,83 @@
     <string name="notification_web_server_stopping">Turning off local browser access…</string>
     <string name="notification_web_server_running">Local browser access is running</string>
     <string name="notification_web_server_error">Web server failed</string>
+
+    <string name="quota_settings_title">Token Quota</string>
+    <string name="quota_settings_section_title">Quota Settings</string>
+    <string name="quota_settings_button">Token Quota Settings</string>
+    <string name="quota_settings_enable">Enable Token Quota</string>
+    <string name="quota_settings_enable_desc">Show warnings when this model group reaches the limit.</string>
+    <string name="quota_settings_disabled_desc">Off. Tap to set token limits and reset schedule.</string>
+    <string name="quota_settings_summary">%1$s tokens · %2$d shared models</string>
+    <string name="quota_settings_summary_with_usage">%1$s / %2$s tokens · %3$d shared models</string>
+    <string name="quota_settings_current_usage">Current usage</string>
+    <string name="quota_settings_usage_rules">Usage Rules</string>
+    <string name="quota_settings_token_limit">Token Limit</string>
+    <string name="quota_settings_token_limit_desc">Counts input, output, and cached input tokens.</string>
+    <string name="quota_settings_reminder_percentage">Reminder at %1$d%%</string>
+    <string name="quota_settings_reset_period">Reset Period</string>
+    <string name="quota_settings_reset_schedule">Reset Schedule</string>
+    <string name="quota_settings_reset_daily">Daily</string>
+    <string name="quota_settings_reset_weekly">Weekly</string>
+    <string name="quota_settings_reset_monthly">Monthly</string>
+    <string name="quota_settings_reset_hour">Hour</string>
+    <string name="quota_settings_reset_minute">Minute</string>
+    <string name="quota_settings_reset_time_desc">Resets every day at %1$s.</string>
+    <string name="quota_settings_reset_weekday">Reset weekday</string>
+    <string name="quota_settings_reset_month_day">Day of month</string>
+    <string name="quota_settings_reset_month_day_desc">If the month is shorter, it resets on the last day of that month.</string>
+    <string name="quota_settings_weekday_monday">Mon</string>
+    <string name="quota_settings_weekday_tuesday">Tue</string>
+    <string name="quota_settings_weekday_wednesday">Wed</string>
+    <string name="quota_settings_weekday_thursday">Thu</string>
+    <string name="quota_settings_weekday_friday">Fri</string>
+    <string name="quota_settings_weekday_saturday">Sat</string>
+    <string name="quota_settings_weekday_sunday">Sun</string>
+    <string name="quota_settings_shared_models">Shared Quota Models</string>
+    <string name="quota_settings_shared_models_desc">Select models from this provider to share quota</string>
+    <string name="quota_settings_shared_models_empty">No other models in this provider.</string>
+    <string name="quota_settings_reset_usage">Reset Usage</string>
+    <string name="quota_settings_reset_confirm">Reset token usage counter to zero?</string>
+    <string name="quota_exceeded_warning">Token quota exceeded (%1$s / %2$s)</string>
+    <string name="quota_reminder_warning">Token usage at %1$.0f%% of quota</string>
+    <string name="quota_usage_display">%1$s / %2$s</string>
+    <string name="quota_usage_tokens">tokens</string>
+    <string name="a11y_token_quota">Token quota usage</string>
+    <string name="quota_detail_used">Used</string>
+    <string name="quota_detail_limit">Limit</string>
+    <string name="quota_detail_next_reset">Next Reset</string>
+    <string name="quota_source_title">Quota source</string>
+    <string name="quota_source_none">No limit</string>
+    <string name="quota_source_none_desc">This model is not counted against a token quota.</string>
+    <string name="quota_source_none_option_desc">Turn off token quota for this model.</string>
+    <string name="quota_source_single">Single model quota</string>
+    <string name="quota_source_single_desc">This model uses its own token limit.</string>
+    <string name="quota_source_single_option_desc">Set a limit only for this model.</string>
+    <string name="quota_source_group">Quota group: %1$s</string>
+    <string name="quota_source_group_desc">This model uses the group quota first. The single quota is kept but not active.</string>
+    <string name="quota_source_group_option">Join quota group</string>
+    <string name="quota_source_group_option_desc">Share one quota with models from this provider.</string>
+    <string name="quota_source_group_current">Using %1$s</string>
+    <string name="quota_group_default_name">Quota Group</string>
+    <string name="quota_group_name_format">%1$s Group</string>
+    <string name="quota_group_select_title">Quota Groups</string>
+    <string name="quota_group_select_desc">Choose or create a group for this model.</string>
+    <string name="quota_group_manage_title">Manage Group</string>
+    <string name="quota_group_create">Create quota group</string>
+    <string name="quota_group_empty">No quota groups yet.</string>
+    <string name="quota_group_missing">This quota group no longer exists.</string>
+    <string name="quota_group_basic_info">Basic info</string>
+    <string name="quota_group_name">Group name</string>
+    <string name="quota_group_model_count">%1$d models</string>
+    <string name="quota_group_summary">%1$d models · %2$s / %3$s tokens</string>
+    <string name="quota_group_active_title">Active group</string>
+    <string name="quota_group_active_desc">Group quota overrides the single quota for this model.</string>
+    <string name="quota_group_leave">Leave group</string>
+    <string name="quota_group_models_title">Models in this group</string>
+    <string name="quota_group_models_desc">A model can only belong to one quota group under this provider.</string>
+    <string name="quota_group_in_other_group">Already in %1$s. Selecting it will move it here.</string>
+    <string name="quota_group_keep_one_model">Keep at least one model in the group.</string>
+    <string name="quota_group_delete">Delete quota group</string>
+    <string name="quota_group_delete_confirm">Delete this quota group? Models will keep their single-model quota settings.</string>
 
 </resources>

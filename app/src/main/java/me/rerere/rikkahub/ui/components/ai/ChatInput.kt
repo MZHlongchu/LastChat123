@@ -196,6 +196,7 @@ import me.rerere.rikkahub.utils.deleteChatFiles
 import me.rerere.rikkahub.utils.getFileMimeType
 import me.rerere.rikkahub.utils.getFileNameFromUri
 import java.io.File
+import java.text.NumberFormat
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 import java.util.Locale
@@ -564,12 +565,8 @@ fun ChatInput(
                             ),
                             label = "rotation"
                         )
-                        val hasActiveModes = remember(conversation.enabledModeIds, settings.modes) {
-                            if (conversation.enabledModeIds.isNotEmpty()) {
-                                true
-                            } else {
-                                settings.modes.any { it.defaultEnabled }
-                            }
+                        val hasActiveModes = remember(conversation.enabledModeIds) {
+                            conversation.enabledModeIds.isNotEmpty()
                         }
                         Icon(
                             imageVector = Icons.Rounded.Add,
@@ -835,7 +832,7 @@ fun ChatInput(
                             onUpdateSettings = onUpdateSettings,
                             onNavigateToLorebook = onNavigateToLorebook,
                             onShowContextRefreshDialog = { showContextRefreshDialog = true },
-                            onDismiss = { dismissExpand() }
+                            onDismiss = { dismissExpand() },
                         )
                     }
                 }
@@ -1281,8 +1278,8 @@ private fun MediaFileInputRow(
                             .background(MaterialTheme.colorScheme.secondary),
                         tint = MaterialTheme.colorScheme.onSecondary
                     )
-                }
             }
+        }
     }
 }
 
@@ -1424,7 +1421,7 @@ private fun FilesPicker(
     onUpdateSettings: (Settings) -> Unit,
     onNavigateToLorebook: (String) -> Unit,
     onShowContextRefreshDialog: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
 ) {
     val settings = LocalSettings.current
     val amoledMode by rememberAmoledDarkMode()
@@ -1558,11 +1555,7 @@ private fun FilesPicker(
         if (!isKeyboardVisible) {
             // Calculate active modes count from conversation
             val activeModeCount = settings.modes.count { mode ->
-                if (conversation.enabledModeIds.isEmpty()) {
-                    mode.defaultEnabled
-                } else {
-                    conversation.enabledModeIds.contains(mode.id)
-                }
+                conversation.enabledModeIds.contains(mode.id)
             }
             
             // Calculate active lorebooks count from assistant
@@ -2466,14 +2459,8 @@ internal fun ModesPickerSheet(
     val smallCorner = 8.dp
     
     // Use local state for immediate UI feedback
-    var localEnabledIds by remember(conversation.id) {
-        mutableStateOf(
-            if (conversation.enabledModeIds.isEmpty()) {
-                settings.modes.filter { it.defaultEnabled }.map { it.id }.toSet()
-            } else {
-                conversation.enabledModeIds
-            }
-        )
+    var localEnabledIds by remember(conversation.id, conversation.enabledModeIds) {
+        mutableStateOf(conversation.enabledModeIds)
     }
     
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
