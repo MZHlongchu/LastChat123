@@ -19,15 +19,7 @@ import kotlin.uuid.Uuid
 
 object MemoryTools {
 
-    private const val TOOL_DESCRIPTION =
-        "Search this assistant's saved memories (core facts and chat episodes) by keywords. " +
-            "Use this when the user references something that was not provided in your current context — " +
-            "e.g. names, dates, prior decisions. " +
-            "Within one query string, space means AND (every term must match). " +
-            "Multiple query strings mean OR (any one matching is enough). " +
-            "Wrap a phrase with double quotes to keep it as one term. " +
-            "Prefer this over guessing. " +
-            "Do NOT use this when the user asks about the current conversation or general knowledge."
+    private const val TOOL_DESCRIPTION = "Search this assistant's saved memories."
 
     private const val MAX_QUERIES = 8
     private const val MAX_LIMIT = 30
@@ -78,6 +70,7 @@ object MemoryTools {
                     required = listOf("queries"),
                 )
             },
+            systemPrompt = { _, _ -> MEMORY_SEARCH_SYSTEM_PROMPT_TEMPLATE },
             execute = { args ->
                 executeSearch(args.jsonObject, assistantIdStr, memoryRepository)
             },

@@ -32,27 +32,34 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.datastore.TOOL_RESULT_KEEP_USER_MESSAGES_MAX
+import me.rerere.rikkahub.data.datastore.TOOL_RESULT_KEEP_USER_MESSAGES_MIN
 import me.rerere.rikkahub.data.datastore.getEmbeddingRetrievalTimeoutSeconds
-import me.rerere.rikkahub.data.datastore.getHttp429MaxRetries
+import me.rerere.rikkahub.data.datastore.getHttpRetryDelaySeconds
+import me.rerere.rikkahub.data.datastore.getHttpRetryMaxRetries
 import me.rerere.rikkahub.data.datastore.getMcpToolCallTimeoutSeconds
+import me.rerere.rikkahub.data.datastore.getToolResultKeepUserMessages
 import me.rerere.rikkahub.data.model.ToolResultHistoryMode
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.nav.OneUITopAppBar
 import me.rerere.rikkahub.ui.components.ui.HapticSwitch
-import me.rerere.rikkahub.ui.components.ui.Select
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.HapticPattern
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
 import me.rerere.rikkahub.ui.pages.setting.components.SettingGroupItem
 import me.rerere.rikkahub.ui.pages.setting.components.SettingsGroup
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import org.koin.androidx.compose.koinViewModel
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingAdvancedPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     val haptics = rememberPremiumHaptics()
+    val navController = LocalNavController.current
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
@@ -157,34 +164,44 @@ fun SettingAdvancedPage(vm: SettingVM = koinViewModel()) {
                             )
                         }
                     )
-                    SettingGroupItem(
-                        title = stringResource(R.string.setting_display_page_http_429_retry_max_title),
-                        subtitle = stringResource(R.string.setting_display_page_http_429_retry_max_desc),
-                        trailing = {
-                            var retryText by remember(settings.getHttp429MaxRetries()) {
-                                mutableStateOf(settings.getHttp429MaxRetries().toString())
-                            }
-
-                            OutlinedTextField(
-                                value = retryText,
-                                onValueChange = { value ->
-                                    val filtered = value.filter { it.isDigit() }
-                                    val parsed = filtered.toIntOrNull()
-                                    val safe = parsed?.coerceIn(0, 10)
-
-                                    retryText = (safe ?: filtered).toString()
-
-                                    if (safe != null) {
-                                        vm.updateSettings { current ->
-                                            if (current.http429MaxRetries == safe) current
-                                            else current.copy(http429MaxRetries = safe)
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.widthIn(min = 80.dp, max = 120.dp),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    val retryMaxRetries = settings.getHttpRetryMaxRetries()
+                    IntegerSliderSettingItem(
+                        title = stringResource(R.string.setting_display_page_http_retry_max_title),
+                        subtitle = stringResource(R.string.setting_display_page_http_retry_max_desc),
+                        value = retryMaxRetries,
+                        valueText = if (retryMaxRetries == 0) {
+                            stringResource(R.string.setting_display_page_http_retry_off)
+                        } else {
+                            stringResource(
+                                R.string.setting_display_page_http_retry_max_value,
+                                retryMaxRetries,
                             )
+                        },
+                        valueRange = 0..10,
+                        onValueChange = { retries ->
+                            haptics.perform(HapticPattern.Pop)
+                            vm.updateSettings { current ->
+                                if (current.httpRetryMaxRetries == retries) current
+                                else current.copy(httpRetryMaxRetries = retries)
+                            }
+                        }
+                    )
+                    val retryDelaySeconds = settings.getHttpRetryDelaySeconds()
+                    IntegerSliderSettingItem(
+                        title = stringResource(R.string.setting_display_page_http_retry_delay_title),
+                        subtitle = stringResource(R.string.setting_display_page_http_retry_delay_desc),
+                        value = retryDelaySeconds,
+                        valueText = stringResource(
+                            R.string.setting_display_page_http_retry_delay_value,
+                            retryDelaySeconds,
+                        ),
+                        valueRange = 1..30,
+                        onValueChange = { delaySeconds ->
+                            haptics.perform(HapticPattern.Pop)
+                            vm.updateSettings { current ->
+                                if (current.httpRetryDelaySeconds == delaySeconds) current
+                                else current.copy(httpRetryDelaySeconds = delaySeconds)
+                            }
                         }
                     )
                 }
@@ -207,6 +224,11 @@ fun SettingAdvancedPage(vm: SettingVM = koinViewModel()) {
                                 }
                             )
                         }
+                    )
+                    SettingGroupItem(
+                        title = stringResource(R.string.setting_tool_prompts_title),
+                        subtitle = stringResource(R.string.setting_tool_prompts_desc),
+                        onClick = { navController.navigate(Screen.SettingCustomToolPrompts) },
                     )
                 }
             }
@@ -236,134 +258,124 @@ fun SettingAdvancedPage(vm: SettingVM = koinViewModel()) {
                 SettingsGroup(
                     title = stringResource(R.string.assistant_page_tool_results_group_title)
                 ) {
-                    data class ModeOption(
-                        val mode: ToolResultHistoryMode,
-                        val title: String,
-                        val subtitle: String,
-                    )
-
-                    val modeOptions = listOf(
-                        ModeOption(
-                            mode = ToolResultHistoryMode.KEEP_ALL,
-                            title = stringResource(R.string.assistant_page_tool_results_mode_keep_all),
-                            subtitle = stringResource(R.string.assistant_page_tool_results_mode_keep_all_desc),
-                        ),
-                        ModeOption(
-                            mode = ToolResultHistoryMode.DISCARD,
-                            title = stringResource(R.string.assistant_page_tool_results_mode_discard),
-                            subtitle = stringResource(R.string.assistant_page_tool_results_mode_discard_desc),
-                        ),
-                        ModeOption(
-                            mode = ToolResultHistoryMode.RAG,
-                            title = stringResource(R.string.assistant_page_tool_results_mode_rag),
-                            subtitle = stringResource(R.string.assistant_page_tool_results_mode_rag_desc),
-                        ),
-                    )
-
-                    val selectedMode = modeOptions.firstOrNull { it.mode == displaySetting.toolResultHistoryMode }
-                        ?: modeOptions.first()
+                    val keepUserMessages = displaySetting.getToolResultKeepUserMessages()
+                    val discardOldToolResults = displaySetting.toolResultHistoryMode != ToolResultHistoryMode.KEEP_ALL
 
                     SettingGroupItem(
-                        title = stringResource(R.string.assistant_page_tool_results_mode_title),
-                        subtitle = selectedMode.subtitle,
+                        title = stringResource(R.string.assistant_page_tool_results_mode_discard),
+                        subtitle = stringResource(
+                            R.string.assistant_page_tool_results_mode_discard_desc,
+                            keepUserMessages,
+                        ),
                         trailing = {
-                            Select(
-                                options = modeOptions,
-                                selectedOption = selectedMode,
-                                onOptionSelected = { option ->
-                                    haptics.perform(HapticPattern.Pop)
-                                    updateDisplaySetting(displaySetting.copy(toolResultHistoryMode = option.mode))
-                                },
-                                optionToString = { it.title },
-                                modifier = Modifier.widthIn(min = 110.dp, max = 130.dp)
+                            HapticSwitch(
+                                checked = discardOldToolResults,
+                                onCheckedChange = { enabled ->
+                                    updateDisplaySetting(
+                                        displaySetting.copy(
+                                            toolResultHistoryMode = if (enabled) {
+                                                ToolResultHistoryMode.DISCARD
+                                            } else {
+                                                ToolResultHistoryMode.KEEP_ALL
+                                            }
+                                        )
+                                    )
+                                }
                             )
                         }
                     )
 
-                    if (displaySetting.toolResultHistoryMode != ToolResultHistoryMode.KEEP_ALL) {
-                        data class KeepOption(val value: Int)
-                        val keepOptions = (1..20).map { KeepOption(it) }
-                        val keepUserMessages = displaySetting.toolResultKeepUserMessages.coerceIn(1, 20)
-                        val selectedKeep = keepOptions.firstOrNull { it.value == keepUserMessages }
-                            ?: KeepOption(keepUserMessages)
-
-                        SettingGroupItem(
+                    if (discardOldToolResults) {
+                        IntegerSliderSettingItem(
                             title = stringResource(R.string.assistant_page_tool_results_keep_title),
                             subtitle = stringResource(
                                 R.string.assistant_page_tool_results_keep_desc,
                                 keepUserMessages,
                             ),
-                            trailing = {
-                                Select(
-                                    options = keepOptions,
-                                    selectedOption = selectedKeep,
-                                    onOptionSelected = { option ->
-                                        haptics.perform(HapticPattern.Pop)
-                                        updateDisplaySetting(displaySetting.copy(toolResultKeepUserMessages = option.value))
-                                    },
-                                    optionToString = { it.value.toString() },
-                                    modifier = Modifier.widthIn(min = 80.dp, max = 120.dp)
-                                )
+                            value = keepUserMessages,
+                            valueText = keepUserMessages.toString(),
+                            valueRange = TOOL_RESULT_KEEP_USER_MESSAGES_MIN..TOOL_RESULT_KEEP_USER_MESSAGES_MAX,
+                            onValueChange = { value ->
+                                haptics.perform(HapticPattern.Pop)
+                                updateDisplaySetting(displaySetting.copy(toolResultKeepUserMessages = value))
                             }
                         )
                     }
 
-                    if (displaySetting.toolResultHistoryMode == ToolResultHistoryMode.RAG) {
-                        Surface(
-                            color = if (LocalDarkMode.current) {
-                                MaterialTheme.colorScheme.surfaceContainerLow
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.assistant_page_tool_results_similarity_threshold),
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                var threshold by remember(displaySetting.toolResultRagSimilarityThreshold) {
-                                    mutableFloatStateOf(displaySetting.toolResultRagSimilarityThreshold.coerceIn(0f, 1f))
-                                }
-                                val currentThreshold = String.format("%.2f", threshold)
-                                Text(
-                                    text = stringResource(
-                                        R.string.assistant_page_tool_results_similarity_threshold_desc,
-                                        currentThreshold,
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Slider(
-                                    value = threshold,
-                                    onValueChange = { newValue ->
-                                        threshold = newValue
-                                        updateDisplaySetting(displaySetting.copy(toolResultRagSimilarityThreshold = newValue))
-                                    },
-                                    valueRange = 0f..1f,
-                                    steps = 19,
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Text(
-                                        stringResource(R.string.assistant_page_rag_similarity_all),
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
-                                    Text(
-                                        stringResource(R.string.assistant_page_rag_similarity_exact),
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun IntegerSliderSettingItem(
+    title: String,
+    subtitle: String,
+    value: Int,
+    valueText: String,
+    valueRange: IntRange,
+    onValueChange: (Int) -> Unit,
+) {
+    val safeValue = value.coerceIn(valueRange.first, valueRange.last)
+    var sliderValue by remember(safeValue, valueRange.first, valueRange.last) {
+        mutableFloatStateOf(safeValue.toFloat())
+    }
+    Surface(
+        color = if (LocalDarkMode.current) {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = valueText,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Slider(
+                value = sliderValue,
+                onValueChange = { newValue ->
+                    val roundedValue = newValue
+                        .roundToInt()
+                        .coerceIn(valueRange.first, valueRange.last)
+                    if (roundedValue != sliderValue.roundToInt()) {
+                        onValueChange(roundedValue)
+                    }
+                    sliderValue = roundedValue.toFloat()
+                },
+                valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
+                steps = (valueRange.last - valueRange.first - 1).coerceAtLeast(0),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

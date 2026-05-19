@@ -20,6 +20,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.parametersOrEmptyObject
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -69,16 +70,18 @@ class ResponseAPI(
             params = params,
             stream = false,
         )
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting)}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: $requestBodyJson")
 
         val response = client.configureClientWithProxy(providerSetting.proxy).newCall(request).await()
         if (!response.isSuccessful) {
@@ -122,16 +125,18 @@ class ResponseAPI(
             params = params,
             stream = true,
         )
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting)}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: $requestBodyJson")
         val rawEventBuffer = StringBuilder()
 
         val listener = object : EventSourceListener() {
@@ -297,7 +302,7 @@ class ResponseAPI(
                                 put(
                                     "parameters",
                                     json.encodeToJsonElement(
-                                        tool.parameters()
+                                        tool.parametersOrEmptyObject()
                                     )
                                 )
                             })

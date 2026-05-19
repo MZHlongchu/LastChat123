@@ -21,8 +21,10 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNames
 import kotlinx.serialization.json.booleanOrNull
 import me.rerere.rikkahub.R
 import me.rerere.ai.provider.Model
@@ -69,12 +71,46 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "PreferencesStore"
 private const val DEFAULT_CONTEXT_HISTORY_LIMIT = 10
+const val TOOL_RESULT_KEEP_USER_MESSAGES_MIN = 1
+const val TOOL_RESULT_KEEP_USER_MESSAGES_MAX = 50
 
-private fun decodeDisplaySettingCompat(raw: String?): DisplaySetting {
-    if (raw.isNullOrBlank()) return DisplaySetting()
+fun DisplaySetting.getToolResultKeepUserMessages(): Int {
+    return toolResultKeepUserMessages.coerceIn(
+        TOOL_RESULT_KEEP_USER_MESSAGES_MIN,
+        TOOL_RESULT_KEEP_USER_MESSAGES_MAX,
+    )
+}
+
+fun Settings.getToolResultKeepUserMessages(): Int {
+    return displaySetting.getToolResultKeepUserMessages()
+}
+
+private fun DisplaySetting.normalizeToolResultSettings(): DisplaySetting {
+    val normalizedMode = if (toolResultHistoryMode == ToolResultHistoryMode.RAG) {
+        ToolResultHistoryMode.DISCARD
+    } else {
+        toolResultHistoryMode
+    }
+    val normalizedKeepUserMessages = getToolResultKeepUserMessages()
+
+    return if (
+        normalizedMode == toolResultHistoryMode &&
+        normalizedKeepUserMessages == toolResultKeepUserMessages
+    ) {
+        this
+    } else {
+        copy(
+            toolResultHistoryMode = normalizedMode,
+            toolResultKeepUserMessages = normalizedKeepUserMessages,
+        )
+    }
+}
+
+internal fun decodeDisplaySettingCompat(raw: String?): DisplaySetting {
+    if (raw.isNullOrBlank()) return DisplaySetting().normalizeToolResultSettings()
 
     val decoded = runCatching { JsonInstant.decodeFromString<DisplaySetting>(raw) }
-        .getOrElse { return DisplaySetting() }
+        .getOrElse { return DisplaySetting().normalizeToolResultSettings() }
 
     val legacyKeepAll = runCatching {
         (JsonInstant.parseToJsonElement(raw) as? JsonObject)
@@ -83,15 +119,15 @@ private fun decodeDisplaySettingCompat(raw: String?): DisplaySetting {
             ?.booleanOrNull
     }.getOrNull()
 
-    if (legacyKeepAll == true) {
-        return decoded.copy(toolResultHistoryMode = ToolResultHistoryMode.KEEP_ALL)
+    val migrated = when {
+        legacyKeepAll == true -> decoded.copy(toolResultHistoryMode = ToolResultHistoryMode.KEEP_ALL)
+        legacyKeepAll == false && decoded.toolResultHistoryMode == ToolResultHistoryMode.KEEP_ALL -> {
+            decoded.copy(toolResultHistoryMode = ToolResultHistoryMode.DISCARD)
+        }
+        else -> decoded
     }
 
-    if (legacyKeepAll == false && decoded.toolResultHistoryMode == ToolResultHistoryMode.KEEP_ALL) {
-        return decoded.copy(toolResultHistoryMode = ToolResultHistoryMode.RAG)
-    }
-
-    return decoded
+    return migrated.normalizeToolResultSettings()
 }
 
 private fun Assistant.normalizeContextManagementFlags(
@@ -193,7 +229,9 @@ class SettingsStore(
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
         val MCP_TOOL_CALL_TIMEOUT_SECONDS = intPreferencesKey("mcp_tool_call_timeout_seconds")
-        val HTTP_429_MAX_RETRIES = intPreferencesKey("http_429_max_retries")
+        val HTTP_RETRY_MAX_RETRIES = intPreferencesKey("http_retry_max_retries")
+        val HTTP_RETRY_DELAY_SECONDS = intPreferencesKey("http_retry_delay_seconds")
+        val HTTP_429_MAX_RETRIES = intPreferencesKey("http_429_max_retries") // Legacy key
 
         // WebDAV
         val WEBDAV_CONFIG = stringPreferencesKey("webdav_config")
@@ -219,6 +257,7 @@ class SettingsStore(
         // Prompt Injections
         val MODES = stringPreferencesKey("modes")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
+        val CUSTOM_TOOL_SYSTEM_PROMPTS = stringPreferencesKey("custom_tool_system_prompts")
 
         // Skills
         val SKILLS = stringPreferencesKey("skills")
@@ -447,7 +486,12 @@ class SettingsStore(
                 } ?: SearchCommonOptions(),
                 searchServiceSelected = preferences[SEARCH_SELECTED] ?: 0,
                 mcpToolCallTimeoutSeconds = (preferences[MCP_TOOL_CALL_TIMEOUT_SECONDS] ?: 60).coerceAtLeast(1),
-                http429MaxRetries = (preferences[HTTP_429_MAX_RETRIES] ?: 0).coerceIn(0, 10),
+                httpRetryMaxRetries = (
+                    preferences[HTTP_RETRY_MAX_RETRIES]
+                        ?: preferences[HTTP_429_MAX_RETRIES]
+                        ?: 0
+                    ).coerceIn(0, 10),
+                httpRetryDelaySeconds = (preferences[HTTP_RETRY_DELAY_SECONDS] ?: 1).coerceIn(1, 30),
                 mcpServers = preferences[MCP_SERVERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -475,6 +519,9 @@ class SettingsStore(
                 lorebooks = preferences[LOREBOOKS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
+                customToolSystemPrompts = preferences[CUSTOM_TOOL_SYSTEM_PROMPTS]?.let {
+                    runCatching { JsonInstant.decodeFromString<Map<String, String>>(it) }.getOrNull()
+                } ?: emptyMap(),
                 skillFolders = preferences[SKILL_FOLDERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -663,9 +710,12 @@ class SettingsStore(
                 providers = settingsToSaveWithReboundSearchIndices.providers.map { provider ->
                     provider.normalizeProviderApiKeys().syncEnabledApiKeysToLegacyField()
                 },
-	            displaySetting = settingsToSaveWithReboundSearchIndices.displaySetting.coerceForConflicts(),
+	            displaySetting = settingsToSaveWithReboundSearchIndices.displaySetting
+                    .normalizeToolResultSettings()
+                    .coerceForConflicts(),
                 mcpToolCallTimeoutSeconds = settingsToSaveWithReboundSearchIndices.mcpToolCallTimeoutSeconds.coerceAtLeast(1),
-                http429MaxRetries = settingsToSaveWithReboundSearchIndices.http429MaxRetries.coerceIn(0, 10),
+                httpRetryMaxRetries = settingsToSaveWithReboundSearchIndices.httpRetryMaxRetries.coerceIn(0, 10),
+                httpRetryDelaySeconds = settingsToSaveWithReboundSearchIndices.httpRetryDelaySeconds.coerceIn(1, 30),
                 webServerPort = settingsToSaveWithReboundSearchIndices.webServerPort.coerceIn(1024, 65535),
                 webServerJwtEnabled = settingsToSaveWithReboundSearchIndices.webServerJwtEnabled &&
                     settingsToSaveWithReboundSearchIndices.webServerAccessPassword.isNotBlank(),
@@ -716,7 +766,8 @@ class SettingsStore(
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(finalSettingsToSave.mcpServers)
             preferences[MCP_TOOL_CALL_TIMEOUT_SECONDS] = finalSettingsToSave.mcpToolCallTimeoutSeconds.coerceAtLeast(1)
-            preferences[HTTP_429_MAX_RETRIES] = finalSettingsToSave.http429MaxRetries.coerceIn(0, 10)
+            preferences[HTTP_RETRY_MAX_RETRIES] = finalSettingsToSave.httpRetryMaxRetries.coerceIn(0, 10)
+            preferences[HTTP_RETRY_DELAY_SECONDS] = finalSettingsToSave.httpRetryDelaySeconds.coerceIn(1, 30)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(finalSettingsToSave.webDavConfig)
             preferences[OBJECT_STORAGE_CONFIG] = JsonInstant.encodeToString(finalSettingsToSave.objectStorageConfig)
             preferences[TTS_PROVIDERS] = JsonInstant.encodeToString(finalSettingsToSave.ttsProviders)
@@ -735,6 +786,8 @@ class SettingsStore(
 
             preferences[MODES] = JsonInstant.encodeToString(finalSettingsToSave.modes)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(finalSettingsToSave.lorebooks)
+            preferences[CUSTOM_TOOL_SYSTEM_PROMPTS] =
+                JsonInstant.encodeToString(finalSettingsToSave.customToolSystemPrompts)
             preferences[SKILL_FOLDERS] = JsonInstant.encodeToString(finalSettingsToSave.skillFolders)
             preferences[SKILLS] = JsonInstant.encodeToString(finalSettingsToSave.skills)
             preferences[ENABLE_SKILL_SCRIPT_EXECUTION] = finalSettingsToSave.enableSkillScriptExecution
@@ -840,7 +893,10 @@ data class Settings(
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
     val mcpToolCallTimeoutSeconds: Int = 60,
-    val http429MaxRetries: Int = 0,
+    @OptIn(ExperimentalSerializationApi::class)
+    @JsonNames("http429MaxRetries")
+    val httpRetryMaxRetries: Int = 0,
+    val httpRetryDelaySeconds: Int = 1,
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val objectStorageConfig: ObjectStorageConfig = ObjectStorageConfig(),
@@ -859,6 +915,7 @@ data class Settings(
     // Prompt Injections
     val modes: List<Mode> = emptyList(),
     val lorebooks: List<Lorebook> = emptyList(),
+    val customToolSystemPrompts: Map<String, String> = emptyMap(),
 
     // Skills (imported from zip; loaded by local tool on demand)
     val skillFolders: List<SkillFolder> = emptyList(),
@@ -1101,8 +1158,9 @@ data class DisplaySetting(
     val showModelIcon: Boolean = true,
     val showModelName: Boolean = true,
     val showTokenUsage: Boolean = false,
-    val messageInputStyle: MessageInputStyle = MessageInputStyle.STANDARD,
+    val messageInputStyle: MessageInputStyle = MessageInputStyle.MINIMAL,
     val showFullscreenInputButton: Boolean = false,
+    val autoScrollOnMessageGeneration: Boolean = false,
     val autoCloseThinking: Boolean = true,
     val showUpdates: Boolean = false,
     val checkForUpdates: Boolean = true, // Check GitHub for app updates
@@ -1405,8 +1463,12 @@ fun Settings.getEmbeddingRetrievalTimeoutSeconds(): Int {
     return displaySetting.embeddingRetrievalTimeoutSeconds.coerceAtLeast(1)
 }
 
-fun Settings.getHttp429MaxRetries(): Int {
-    return http429MaxRetries.coerceIn(0, 10)
+fun Settings.getHttpRetryMaxRetries(): Int {
+    return httpRetryMaxRetries.coerceIn(0, 10)
+}
+
+fun Settings.getHttpRetryDelaySeconds(): Int {
+    return httpRetryDelaySeconds.coerceIn(1, 30)
 }
 
 /**

@@ -23,6 +23,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.parametersOrEmptyObject
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
@@ -120,16 +121,18 @@ class ClaudeProvider(private val client: OkHttpClient) : Provider<ProviderSettin
         params: TextGenerationParams
     ): MessageChunk = withContext(Dispatchers.IO) {
         val requestBody = buildMessageRequest(messages, params)
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: $requestBodyJson")
 
         val response = client.configureClientWithProxy(providerSetting.proxy).newCall(request).await()
         if (!response.isSuccessful) {
@@ -193,17 +196,19 @@ class ClaudeProvider(private val client: OkHttpClient) : Provider<ProviderSettin
         params: TextGenerationParams
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildMessageRequest(messages, params, stream = true)
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: $requestBodyJson")
 
         requestBody["messages"]!!.jsonArray.forEach {
             Log.i(TAG, "streamText: $it")
@@ -408,7 +413,7 @@ class ClaudeProvider(private val client: OkHttpClient) : Provider<ProviderSettin
                         add(buildJsonObject {
                             put("name", tool.name)
                             put("description", tool.description)
-                            put("input_schema", json.encodeToJsonElement(tool.parameters()))
+                            put("input_schema", json.encodeToJsonElement(tool.parametersOrEmptyObject()))
                         })
                     }
                     builtInTools.forEach { add(it) }

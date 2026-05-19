@@ -24,6 +24,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.parametersOrEmptyObject
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -77,18 +78,20 @@ class ChatCompletionsAPI(
                 params = params,
                 providerSetting = providerSetting
             )
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
 
         val proxyClient = client.configureClientWithProxy(providerSetting.proxy)
 
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting)}")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: $requestBodyJson")
 
         val response = proxyClient.newCall(request).await()
         if (!response.isSuccessful) {
@@ -163,19 +166,21 @@ class ChatCompletionsAPI(
             providerSetting = providerSetting,
             stream = true,
         )
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
 
         val proxyClient = client.configureClientWithProxy(providerSetting.proxy)
 
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting)}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: $requestBodyJson")
 
         // just for debugging response body
         // println(client.newCall(request).await().body?.string())
@@ -318,7 +323,6 @@ class ChatCompletionsAPI(
         }
     }
 
-
     private fun buildChatCompletionRequest(
         messages: List<UIMessage>,
         params: TextGenerationParams,
@@ -443,7 +447,7 @@ class ChatCompletionsAPI(
                                 put(
                                     "parameters",
                                     json.encodeToJsonElement(
-                                        tool.parameters()
+                                        tool.parametersOrEmptyObject()
                                     )
                                 )
                             })
@@ -464,10 +468,12 @@ class ChatCompletionsAPI(
     ) = buildJsonArray {
         val lastUserMessageIndex = messages.indexOfLast { it.role == MessageRole.USER }
         val requireReasoningContentForToolCalls =
-            modelId.contains("deepseek", ignoreCase = true) || modelId.contains("kimi", ignoreCase = true)
+            modelId.contains("deepseek", ignoreCase = true) ||
+                modelId.contains("kimi", ignoreCase = true) ||
+                modelId.contains("mimo", ignoreCase = true)
 
         // Identify indices belonging to turns (between user messages) that contain tool calls.
-        // DeepSeek/Kimi require reasoning_content from ALL assistant messages in such turns
+        // DeepSeek/Kimi/MiMo require reasoning_content from ALL assistant messages in such turns
         // to be passed back in subsequent requests, not just the current turn.
         val toolCallTurnIndices = if (requireReasoningContentForToolCalls) {
             val indices = mutableSetOf<Int>()

@@ -58,6 +58,7 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.BochaOptions -> BochaSearchService
                 is SearchServiceOptions.NanoGPTOptions -> NanoGPTSearchService
                 is SearchServiceOptions.GrokOptions -> GrokSearchService
+                is SearchServiceOptions.SerperOptions -> SerperSearchService
             } as SearchService<T>
         }
 
@@ -83,6 +84,15 @@ interface SearchService<T : SearchServiceOptions> {
 enum class MultiSearchStrategy {
     @SerialName("parallel") PARALLEL,
     @SerialName("sequential") SEQUENTIAL,
+}
+
+@Serializable
+enum class GrokSearchApiType(val path: String) {
+    @SerialName("responses")
+    RESPONSES("/responses"),
+
+    @SerialName("chat_completions")
+    CHAT_COMPLETIONS("/chat/completions"),
 }
 
 @Serializable
@@ -146,6 +156,7 @@ sealed class SearchServiceOptions {
             BochaOptions::class to "博查",
             NanoGPTOptions::class to "NanoGPT",
             GrokOptions::class to "Grok",
+            SerperOptions::class to "Serper",
         )
     }
 
@@ -280,11 +291,39 @@ sealed class SearchServiceOptions {
         val model: String = "grok-4.20-0309-non-reasoning",
         val enableCustom: Boolean = false,
         val customBaseUrl: String = "https://api.x.ai/v1",
-        val customPath: String = "/responses",
+        val apiType: GrokSearchApiType = GrokSearchApiType.RESPONSES,
+        @SerialName("customPath")
+        val legacyCustomPath: String = GrokSearchApiType.RESPONSES.path,
         val customSystemPrompt: String = "You are a helpful search assistant. Search the web to find accurate and up-to-date information for the user's query. Provide a comprehensive answer with citations.",
         val enableStream: Boolean = false,
         val alias: String = "",
     ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("serper")
+    data class SerperOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+        val hl: String = "zh-cn",
+        val alias: String = "",
+    ) : SearchServiceOptions()
+}
+
+val SearchServiceOptions.GrokOptions.resolvedApiType: GrokSearchApiType
+    get() = if (
+        apiType == GrokSearchApiType.RESPONSES &&
+        legacyCustomPath.trim().trimEnd('/').endsWith("/chat/completions", ignoreCase = true)
+    ) {
+        GrokSearchApiType.CHAT_COMPLETIONS
+    } else {
+        apiType
+    }
+
+fun SearchServiceOptions.GrokOptions.withApiType(apiType: GrokSearchApiType): SearchServiceOptions.GrokOptions {
+    return copy(
+        apiType = apiType,
+        legacyCustomPath = apiType.path,
+    )
 }
 
 val SearchServiceOptions.rawAlias: String
@@ -304,6 +343,7 @@ val SearchServiceOptions.rawAlias: String
         is SearchServiceOptions.BochaOptions -> alias
         is SearchServiceOptions.NanoGPTOptions -> alias
         is SearchServiceOptions.GrokOptions -> alias
+        is SearchServiceOptions.SerperOptions -> alias
     }
 
 val SearchServiceOptions.displayName: String
@@ -324,6 +364,7 @@ val SearchServiceOptions.displayName: String
             is SearchServiceOptions.BochaOptions -> alias
             is SearchServiceOptions.NanoGPTOptions -> alias
             is SearchServiceOptions.GrokOptions -> alias
+            is SearchServiceOptions.SerperOptions -> alias
         }
         return alias.ifBlank { SearchServiceOptions.TYPES[this::class] ?: "Unknown" }
     }
@@ -344,6 +385,7 @@ fun SearchServiceOptions.withAlias(newAlias: String): SearchServiceOptions = whe
     is SearchServiceOptions.BochaOptions -> copy(alias = newAlias)
     is SearchServiceOptions.NanoGPTOptions -> copy(alias = newAlias)
     is SearchServiceOptions.GrokOptions -> copy(alias = newAlias)
+    is SearchServiceOptions.SerperOptions -> copy(alias = newAlias)
 }
 
 internal suspend fun Call.await(): Response {

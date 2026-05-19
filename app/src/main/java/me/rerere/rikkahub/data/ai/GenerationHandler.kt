@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -43,26 +44,36 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UsedLorebookEntry
 import me.rerere.ai.ui.UsedMemory
 import me.rerere.ai.ui.UsedMode
+import me.rerere.ai.ui.UsedSessionMemory
 import me.rerere.ai.ui.handleMessageChunk
 import me.rerere.ai.ui.limitContext
 import me.rerere.ai.ui.truncate
 import me.rerere.ai.util.HttpStatusException
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_LEARNING_MODE_PROMPT
+import me.rerere.rikkahub.data.ai.tools.MEMORY_CONTEXT_VARIABLE
+import me.rerere.rikkahub.data.ai.tools.MEMORY_MANAGEMENT_SYSTEM_PROMPT_TEMPLATE
+import me.rerere.rikkahub.data.ai.tools.MEMORY_MANAGEMENT_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.SESSION_MEMORY_CONTEXT_VARIABLE
+import me.rerere.rikkahub.data.ai.tools.SESSION_MEMORY_MANAGEMENT_SYSTEM_PROMPT_TEMPLATE
+import me.rerere.rikkahub.data.ai.tools.SESSION_MEMORY_MANAGEMENT_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.renderConfiguredToolSystemPrompt
+import me.rerere.rikkahub.data.ai.tools.renderConfiguredSystemPrompt
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentSummaryTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
+import me.rerere.rikkahub.data.ai.transformers.SKIP_MESSAGE_TEMPLATE_METADATA_KEY
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getHttp429MaxRetries
+import me.rerere.rikkahub.data.datastore.getHttpRetryDelaySeconds
+import me.rerere.rikkahub.data.datastore.getHttpRetryMaxRetries
+import me.rerere.rikkahub.data.datastore.getToolResultKeepUserMessages
 import me.rerere.rikkahub.data.ai.rag.EmbeddingService
-import me.rerere.rikkahub.data.db.entity.ToolResultArchiveEntity
-import me.rerere.rikkahub.data.db.entity.ToolResultArchiveChunkEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -71,6 +82,7 @@ import me.rerere.rikkahub.data.model.LorebookActivationType
 import me.rerere.rikkahub.data.model.LorebookEntry
 import me.rerere.rikkahub.data.model.Mode
 import me.rerere.rikkahub.data.model.ModeAttachmentType
+import me.rerere.rikkahub.data.model.SessionMemory
 import me.rerere.rikkahub.data.model.ToolResultHistoryMode
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -78,17 +90,28 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.ToolResultArchiveRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.R
+import java.io.IOException
 import java.util.Locale
 import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationHandler"
+private const val SEARCH_WEB_TOOL_NAME = "search_web"
 private val MEMORY_TOOL_NAMES = setOf("create_memory", "edit_memory", "delete_memory")
+private val SESSION_MEMORY_TOOL_NAMES = setOf(
+    "create_session_memory",
+    "edit_session_memory",
+    "delete_session_memory",
+)
+private val INTERNAL_MEMORY_TOOL_NAMES = MEMORY_TOOL_NAMES + SESSION_MEMORY_TOOL_NAMES
+private const val SESSION_MEMORY_MAX_COUNT = 50
+private const val SESSION_MEMORY_MAX_CONTENT_CHARS = 3000
 private const val MCP_TOOL_APPROVAL_REJECTED_TEXT = "User declined this call"
 private const val META_ANTHROPIC_TYPE = "anthropic_type"
 private const val TYPE_SERVER_TOOL_USE = "server_tool_use"
 private const val CLAUDE_WEB_SEARCH_TOOL_NAME = "web_search"
 private const val GROK_WEB_SEARCH_TOOL_NAME = "web_search"
 private const val GROK_X_SEARCH_TOOL_NAME = "x_search"
+private val RETRYABLE_HTTP_STATUS_CODES = setOf(408, 429, 500, 502, 503, 504)
 
 /**
  * Result of building messages, includes both the messages and info about activated context sources.
@@ -98,6 +121,7 @@ data class BuildMessagesResult(
     val usedLorebookEntries: List<UsedLorebookEntry> = emptyList(),
     val usedModes: List<UsedMode> = emptyList(),
     val usedMemories: List<UsedMemory> = emptyList(),
+    val usedSessionMemories: List<UsedSessionMemory> = emptyList(),
 )
 
 @Serializable
@@ -106,6 +130,66 @@ sealed interface GenerationChunk {
         val messages: List<UIMessage>,
         val finishReasons: Set<String> = emptySet(),
     ) : GenerationChunk
+}
+
+internal fun shouldRetryHttpRequest(
+    throwable: Throwable,
+    attempt: Int,
+    maxRetries: Int,
+    emittedAnyChunk: Boolean = false,
+): Boolean {
+    if (throwable.hasCancellationException()) return false
+    if (maxRetries <= 0) return false
+    if (emittedAnyChunk) return false
+    if (!throwable.isRetryableHttpOrNetworkError()) return false
+    return attempt <= maxRetries
+}
+
+internal fun computeHttpRetryDelayMs(retryDelaySeconds: Int): Long {
+    return retryDelaySeconds.coerceIn(1, 30) * 1_000L
+}
+
+private fun Throwable.isRetryableHttpOrNetworkError(): Boolean {
+    return hasRetryableHttpStatusCode() || hasRetryableNetworkError()
+}
+
+private fun Throwable.hasCancellationException(): Boolean {
+    val visited = HashSet<Throwable>()
+    var current: Throwable? = this
+    while (current != null && visited.add(current)) {
+        if (current is CancellationException) return true
+        current = current.cause
+    }
+    return false
+}
+
+private fun Throwable.hasRetryableHttpStatusCode(): Boolean {
+    val visited = HashSet<Throwable>()
+    var current: Throwable? = this
+    while (current != null && visited.add(current)) {
+        if (current is HttpStatusException && current.statusCode in RETRYABLE_HTTP_STATUS_CODES) {
+            return true
+        }
+        current = current.cause
+    }
+    return false
+}
+
+private fun Throwable.hasRetryableNetworkError(): Boolean {
+    val visited = HashSet<Throwable>()
+    var current: Throwable? = this
+    while (current != null && visited.add(current)) {
+        if (current is IOException && !current.isCanceledIOException()) {
+            return true
+        }
+        current = current.cause
+    }
+    return false
+}
+
+private fun IOException.isCanceledIOException(): Boolean {
+    val normalizedMessage = message?.lowercase().orEmpty()
+    return normalizedMessage == "canceled" || normalizedMessage == "cancelled"
 }
 
 class GenerationHandler(
@@ -128,6 +212,9 @@ class GenerationHandler(
         outputTransformers: List<OutputMessageTransformer> = emptyList(),
         assistant: Assistant,
         memories: List<AssistantMemory>? = null,
+        sessionMemories: List<SessionMemory> = emptyList(),
+        enableSessionMemoryTools: Boolean = false,
+        onSessionMemoriesChanged: suspend (List<SessionMemory>) -> Unit = {},
         enableMemoryTools: Boolean = true,
         tools: List<Tool> = emptyList(),
         truncateIndex: Int = -1,
@@ -141,6 +228,7 @@ class GenerationHandler(
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
+        var currentSessionMemories = sessionMemories
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -165,8 +253,17 @@ class GenerationHandler(
                         }
                     ).let(this::addAll)
                 }
+                if (assistant.enableSessionMemory && enableSessionMemoryTools) {
+                    buildSessionMemoryTools(
+                        getMemories = { currentSessionMemories },
+                        onChange = { updatedMemories ->
+                            currentSessionMemories = updatedMemories
+                            onSessionMemoriesChanged(updatedMemories)
+                        },
+                    ).let(this::addAll)
+                }
                 addAll(tools)
-            }
+            }.sortedWith(compareBy<Tool> { it.name }.thenBy { it.description })
 
             generateInternal(
                 assistant = assistant,
@@ -201,6 +298,7 @@ class GenerationHandler(
                 provider = provider,
                 tools = toolsInternal,
                 memories = memories ?: emptyList(),
+                sessionMemories = if (assistant.enableSessionMemory) currentSessionMemories else emptyList(),
                 truncateIndex = truncateIndex,
                 stream = assistant.streamOutput,
                 enabledModeIds = enabledModeIds,
@@ -546,7 +644,7 @@ class GenerationHandler(
                         assistantId = assistant.id.toString(),
                         userTurnIndex = userTurnIndex,
                         results = results,
-                        enableRagIndexing = settings.displaySetting.toolResultHistoryMode == ToolResultHistoryMode.RAG,
+                        enableRagIndexing = false,
                     )
                 }
             }
@@ -576,6 +674,7 @@ class GenerationHandler(
         model: Model,
         tools: List<Tool>,
         memories: List<AssistantMemory>,
+        sessionMemories: List<SessionMemory>,
         truncateIndex: Int,
         enabledModeIds: Set<Uuid> = emptySet(),
     ): BuildMessagesResult {
@@ -623,23 +722,18 @@ class GenerationHandler(
         }
 
         val toolResultHistoryMode = settings.displaySetting.toolResultHistoryMode
-        val keepUserMessages = settings.displaySetting.toolResultKeepUserMessages.coerceAtLeast(0)
-        val toolResultRagSimilarityThreshold = settings.displaySetting.toolResultRagSimilarityThreshold
-            .takeIf { it.isFinite() }
-            ?.coerceIn(0f, 1f)
-            ?: 0.45f
+        val keepUserMessages = settings.getToolResultKeepUserMessages()
         val contextMessages = if (
             conversationId != null &&
-            (toolResultHistoryMode == ToolResultHistoryMode.RAG ||
-                toolResultHistoryMode == ToolResultHistoryMode.DISCARD)
+            toolResultHistoryMode != ToolResultHistoryMode.KEEP_ALL
         ) {
             rawContextMessages.filterNot { message ->
                 val turnIndex = userTurnIndexByMessageId[message.id] ?: totalUserTurnCount
                 val isOld = (totalUserTurnCount - turnIndex) > keepUserMessages
                 if (!isOld) return@filterNot false
 
-                val hasExternalToolCall = message.getToolCalls().any { it.toolName !in MEMORY_TOOL_NAMES }
-                val hasExternalToolResult = message.getToolResults().any { it.toolName !in MEMORY_TOOL_NAMES }
+                val hasExternalToolCall = message.getToolCalls().any { it.toolName !in INTERNAL_MEMORY_TOOL_NAMES }
+                val hasExternalToolResult = message.getToolResults().any { it.toolName !in INTERNAL_MEMORY_TOOL_NAMES }
                 hasExternalToolCall || hasExternalToolResult
             }
         } else {
@@ -697,6 +791,9 @@ class GenerationHandler(
 
         val maxTokens = assistant.maxTokenUsage
         var currentTokens = 0
+        val searchCurrentDateContextMessage = buildSearchCurrentDateContextMessage(
+            include = tools.any { it.name == SEARCH_WEB_TOOL_NAME },
+        )
 
         // Cosine similarity for RAG matching
         fun cosineSimilarity(a: List<Float>, b: List<Float>): Float {
@@ -778,71 +875,6 @@ class GenerationHandler(
 
         // Get recent message text for lorebook keyword scanning
         val recentMessagesForScan = documentArchivedMessages.takeLast(10).map { it.toText() }
-
-        val toolResultRagPrompt = run {
-            if (toolResultHistoryMode != ToolResultHistoryMode.RAG) return@run ""
-            val id = conversationId ?: run {
-                Log.w(TAG, "Tool result RAG enabled but conversationId is null; skipping archived retrieval (temporary chat?)")
-                return@run ""
-            }
-
-            val maxUserTurnIndexExclusive = (totalUserTurnCount - keepUserMessages).coerceAtLeast(0)
-            if (maxUserTurnIndexExclusive <= 0) return@run ""
-
-            val queryText = documentArchivedMessages.asReversed()
-                .asSequence()
-                .filter { it.role == MessageRole.USER }
-                .take(3)
-                .toList()
-                .asReversed()
-                .joinToString(separator = "\n") { it.toContentText() }
-                .trim()
-            if (queryText.isBlank()) return@run ""
-
-            val results = toolResultArchiveRepository.retrieveRelevantToolResultChunksWithScores(
-                conversationId = id.toString(),
-                assistantId = assistant.id.toString(),
-                query = queryText,
-                maxUserTurnIndexExclusive = maxUserTurnIndexExclusive,
-                limit = 6,
-                similarityThreshold = toolResultRagSimilarityThreshold,
-            )
-            if (results.isEmpty()) {
-                val fallback = toolResultArchiveRepository.retrieveRelevantToolResultsWithScores(
-                    conversationId = id.toString(),
-                    assistantId = assistant.id.toString(),
-                    query = queryText,
-                    maxUserTurnIndexExclusive = maxUserTurnIndexExclusive,
-                    limit = 6,
-                    similarityThreshold = toolResultRagSimilarityThreshold,
-                )
-                if (fallback.isEmpty()) {
-                    Log.w(
-                        TAG,
-                        "Tool result RAG retrieved nothing (chunks=0, tools=0) beforeTurn<$maxUserTurnIndexExclusive>",
-                    )
-                    return@run ""
-                }
-                return@run buildToolResultRagPrompt(fallback, maxChars = 6_000)
-            }
-
-            if (settings.enableRagLogging) {
-                Log.d(
-                    "ToolRAG",
-                    "Retrieved ${results.size} chunks (beforeTurn<$maxUserTurnIndexExclusive threshold=$toolResultRagSimilarityThreshold) for query='${queryText.take(120)}'"
-                )
-                results.forEach { (chunk, score) ->
-                    Log.d(
-                        "ToolRAG",
-                        " - tool=${chunk.toolName} call=${chunk.toolCallId} chunk=${chunk.chunkIndex} score=${
-                            String.format(Locale.US, "%.3f", score)
-                        } text='${chunk.chunkText.trim().take(120)}'"
-                    )
-                }
-            }
-
-            buildToolResultChunkRagPrompt(results, maxChars = 6_000)
-        }
 
         // New conversations copy defaults from Assistant.enabledModeIds.
         val enabledModes = settings.modes.filter { enabledModeIds.contains(it.id) }
@@ -990,12 +1022,21 @@ class GenerationHandler(
 
         tools.forEach { tool ->
             baseSystemPromptBuilder.appendLine()
-            baseSystemPromptBuilder.append(tool.systemPrompt(model, documentArchivedMessages))
+            baseSystemPromptBuilder.append(
+                tool.renderConfiguredSystemPrompt(
+                    settings = settings,
+                    model = model,
+                    messages = documentArchivedMessages,
+                )
+            )
         }
         val baseSystemPrompt = baseSystemPromptBuilder.toString()
         currentTokens += estimateTokens(baseSystemPrompt)
         if (contextSummarySection.isNotBlank()) {
             currentTokens += estimateTokens(contextSummarySection)
+        }
+        searchCurrentDateContextMessage?.let {
+            currentTokens += estimateTokens(it)
         }
         currentTokens += inChatInjections.sumOf { estimateTokens(it.prompt) }
 
@@ -1012,10 +1053,11 @@ class GenerationHandler(
                 val today = java.time.LocalDate.now()
                 val recentConversations = conversationRepo.getRecentConversations(
                     assistantId = assistant.id,
-                    limit = 3,
-                ).filter { 
-                    java.time.LocalDateTime.ofInstant(it.updateAt, java.time.ZoneId.systemDefault()).toLocalDate() == today 
-                }
+                    limit = 4,
+                ).filter {
+                    java.time.LocalDateTime.ofInstant(it.updateAt, java.time.ZoneId.systemDefault()).toLocalDate() == today
+                        && it.id != conversationId
+                }.take(3)
                 recentConversations.map { conversation ->
                     AssistantMemory(
                         id = -1,
@@ -1027,7 +1069,7 @@ class GenerationHandler(
             } else {
                 emptyList()
             }
-            val pinnedFirst = memories.filter { it.pinned } + memories.filterNot { it.pinned }
+            val pinnedFirst = memories.withStablePinnedPrefix()
             (pinnedFirst + recentChatMemories).distinctBy { it.content } // Avoid duplicates
         } else {
             emptyList()
@@ -1187,31 +1229,57 @@ class GenerationHandler(
             baseMessages = selectedMessagesByHistoryOrder,
             injections = inChatInjections,
         )
+        val includeMemoryToolInstructions = tools.any { it.name in MEMORY_TOOL_NAMES }
+        val includeSessionMemoryToolInstructions = tools.any { it.name in SESSION_MEMORY_TOOL_NAMES }
+        val pinnedMemoriesForPrefix = selectedMemories
+            .filter { it.pinned }
+            .sortedByMemoryTime()
+        val dynamicMemories = selectedMemories.filterNot { it.pinned }
+        val pinnedMemoryContextMessage = buildPinnedMemoryContextMessage(pinnedMemoriesForPrefix)
+        val dynamicMemoryContextMessage = buildDynamicMemoryContextMessage(
+            sessionMemories = sessionMemories,
+            memories = dynamicMemories,
+        )
+        val contextSummaryContextMessage = buildContextSummaryContextMessage(contextSummarySection)
+        val selectedMessagesWithSearchDate = insertBeforeLatestUserMessage(
+            messages = selectedMessagesWithInjections,
+            contextMessage = searchCurrentDateContextMessage,
+        )
+        val selectedMessagesWithDynamicContext = insertBeforeLatestUserMessage(
+            messages = selectedMessagesWithSearchDate,
+            contextMessage = dynamicMemoryContextMessage,
+        )
 
         val builtMessages = buildList {
             val finalSystemPrompt = buildString {
                 append(baseSystemPrompt)
-                if (contextSummarySection.isNotBlank()) {
-                    appendLine()
-                    append(contextSummarySection)
-                }
-                val includeMemoryToolInstructions = tools.any { it.name in MEMORY_TOOL_NAMES }
-                val memoryPrompt = buildMemoryPrompt(
+                val sessionMemoryPrompt = buildSessionMemorySystemPrompt(
+                    settings = settings,
                     model = model,
-                    memories = selectedMemories,
+                    includeToolInstructions = includeSessionMemoryToolInstructions,
+                )
+                if (sessionMemoryPrompt.isNotBlank()) {
+                    appendLine()
+                    append(sessionMemoryPrompt)
+                }
+                val memoryPrompt = buildMemorySystemPrompt(
+                    settings = settings,
+                    model = model,
                     includeToolInstructions = includeMemoryToolInstructions,
                 )
                 if (memoryPrompt.isNotBlank()) {
                     appendLine()
                     append(memoryPrompt)
                 }
-                if (toolResultRagPrompt.isNotBlank()) {
-                    appendLine()
-                    append(toolResultRagPrompt)
-                }
             }
             if (finalSystemPrompt.isNotBlank()) {
                 add(UIMessage.system(finalSystemPrompt))
+            }
+            if (pinnedMemoryContextMessage != null) {
+                add(pinnedMemoryContextMessage)
+            }
+            if (contextSummaryContextMessage != null) {
+                add(contextSummaryContextMessage)
             }
 
             // Add mode and lorebook attachments as a user message if there are any
@@ -1225,7 +1293,7 @@ class GenerationHandler(
             }
 
             // Restore chat history order
-            addAll(selectedMessagesWithInjections)
+            addAll(selectedMessagesWithDynamicContext)
         }
 
         val usedMemories = selectedMemories.mapIndexed { index, memory ->
@@ -1243,12 +1311,21 @@ class GenerationHandler(
                 activationReason = reason,
             )
         }
+        val usedSessionMemories = sessionMemories.mapIndexed { index, memory ->
+            UsedSessionMemory(
+                memoryId = memory.id,
+                memoryContent = memory.content.take(50) + if (memory.content.length > 50) "..." else "",
+                priority = sessionMemories.size - index,
+                activationReason = "Active in this conversation",
+            )
+        }
 
         return BuildMessagesResult(
             messages = builtMessages,
             usedLorebookEntries = usedLorebookEntries,
             usedModes = usedModes,
             usedMemories = usedMemories,
+            usedSessionMemories = usedSessionMemories,
         )
     }
 
@@ -1264,6 +1341,7 @@ class GenerationHandler(
         provider: ProviderSetting,
         tools: List<Tool>,
         memories: List<AssistantMemory>,
+        sessionMemories: List<SessionMemory>,
         truncateIndex: Int,
         stream: Boolean,
         enabledModeIds: Set<Uuid> = emptySet(),
@@ -1277,6 +1355,7 @@ class GenerationHandler(
             model = model,
             tools = tools,
             memories = memories,
+            sessionMemories = sessionMemories,
             truncateIndex = truncateIndex,
             enabledModeIds = enabledModeIds,
         )
@@ -1284,9 +1363,14 @@ class GenerationHandler(
         val usedLorebookEntries = buildResult.usedLorebookEntries
         val usedModes = buildResult.usedModes
         val usedMemories = buildResult.usedMemories
-        val hasContextSources = usedLorebookEntries.isNotEmpty() || usedModes.isNotEmpty() || usedMemories.isNotEmpty()
+        val usedSessionMemories = buildResult.usedSessionMemories
+        val hasContextSources = usedLorebookEntries.isNotEmpty() ||
+            usedModes.isNotEmpty() ||
+            usedMemories.isNotEmpty() ||
+            usedSessionMemories.isNotEmpty()
 
         var messages: List<UIMessage> = messages
+        var requestBodyJson: String? = null
         val params = TextGenerationParams(
             model = model,
             temperature = assistant.temperature,
@@ -1301,11 +1385,12 @@ class GenerationHandler(
             customBody = buildList {
                 addAll(assistant.customBodies)
                 addAll(model.customBodies)
-            }
+            },
+            onRequestBody = { requestBodyJson = it },
         )
         if (stream) {
             aiLoggingManager.addLog(AILogging.Generation(
-                params = params,
+                params = params.copy(onRequestBody = null),
                 messages = messages,
                 providerSetting = provider,
                 stream = true
@@ -1314,7 +1399,8 @@ class GenerationHandler(
             var firstChunkAt: Long? = null
             var failure: Throwable? = null
             val rawResponseText = StringBuilder()
-            val max429Retries = settings.getHttp429MaxRetries()
+            val maxHttpRetries = settings.getHttpRetryMaxRetries()
+            val httpRetryDelayMs = computeHttpRetryDelayMs(settings.getHttpRetryDelaySeconds())
             var streamAttempt = 0
             try {
                 while (true) {
@@ -1355,17 +1441,16 @@ class GenerationHandler(
                         }
                         break
                     } catch (t: Throwable) {
-                        if (!shouldRetry429(t, attempt = streamAttempt, maxRetries = max429Retries, emittedAnyChunk = emittedAnyChunk)) {
+                        if (!shouldRetryHttpRequest(t, attempt = streamAttempt, maxRetries = maxHttpRetries, emittedAnyChunk = emittedAnyChunk)) {
                             throw t
                         }
 
-                        val delayMs = compute429RetryDelayMs(attempt = streamAttempt)
                         Log.w(
                             TAG,
-                            "generateInternal(stream): got HTTP 429, retry ${streamAttempt}/$max429Retries in ${delayMs}ms",
+                            "generateInternal(stream): got retryable HTTP/network error, retry ${streamAttempt}/$maxHttpRetries in ${httpRetryDelayMs}ms",
                             t,
                         )
-                        delay(delayMs)
+                        delay(httpRetryDelayMs)
                     }
                 }
 
@@ -1376,6 +1461,7 @@ class GenerationHandler(
                                 usedLorebookEntries = usedLorebookEntries.ifEmpty { null },
                                 usedModes = usedModes.ifEmpty { null },
                                 usedMemories = usedMemories.ifEmpty { null },
+                                usedSessionMemories = usedSessionMemories.ifEmpty { null },
                             )
                         } else {
                             message
@@ -1392,6 +1478,7 @@ class GenerationHandler(
                     providerSetting = provider,
                     params = params,
                     requestMessages = internalMessages,
+                    requestBodyJson = requestBodyJson,
                     responseText = messages.lastOrNull()?.toContentText().orEmpty(),
                     responseRawText = rawResponseText.toString(),
                     stream = true,
@@ -1402,7 +1489,7 @@ class GenerationHandler(
             }
         } else {
             aiLoggingManager.addLog(AILogging.Generation(
-                params = params,
+                params = params.copy(onRequestBody = null),
                 messages = messages,
                 providerSetting = provider,
                 stream = false
@@ -1410,7 +1497,8 @@ class GenerationHandler(
             val startAt = System.currentTimeMillis()
             var failure: Throwable? = null
             var rawResponseText = ""
-            val max429Retries = settings.getHttp429MaxRetries()
+            val maxHttpRetries = settings.getHttpRetryMaxRetries()
+            val httpRetryDelayMs = computeHttpRetryDelayMs(settings.getHttpRetryDelaySeconds())
             var nonStreamAttempt = 0
             try {
                 while (true) {
@@ -1442,6 +1530,7 @@ class GenerationHandler(
                                         usedLorebookEntries = usedLorebookEntries.ifEmpty { null },
                                         usedModes = usedModes.ifEmpty { null },
                                         usedMemories = usedMemories.ifEmpty { null },
+                                        usedSessionMemories = usedSessionMemories.ifEmpty { null },
                                     )
                                 } else {
                                     message
@@ -1458,17 +1547,16 @@ class GenerationHandler(
                         onUpdateMessages(messages, finishReasons)
                         break
                     } catch (t: Throwable) {
-                        if (!shouldRetry429(t, attempt = nonStreamAttempt, maxRetries = max429Retries)) {
+                        if (!shouldRetryHttpRequest(t, attempt = nonStreamAttempt, maxRetries = maxHttpRetries)) {
                             throw t
                         }
 
-                        val delayMs = compute429RetryDelayMs(attempt = nonStreamAttempt)
                         Log.w(
                             TAG,
-                            "generateInternal(non-stream): got HTTP 429, retry ${nonStreamAttempt}/$max429Retries in ${delayMs}ms",
+                            "generateInternal(non-stream): got retryable HTTP/network error, retry ${nonStreamAttempt}/$maxHttpRetries in ${httpRetryDelayMs}ms",
                             t,
                         )
-                        delay(delayMs)
+                        delay(httpRetryDelayMs)
                     }
                 }
             } catch (t: Throwable) {
@@ -1480,6 +1568,7 @@ class GenerationHandler(
                     providerSetting = provider,
                     params = params,
                     requestMessages = internalMessages,
+                    requestBodyJson = requestBodyJson,
                     responseText = messages.lastOrNull()?.toContentText().orEmpty(),
                     responseRawText = rawResponseText,
                     stream = false,
@@ -1568,106 +1657,301 @@ class GenerationHandler(
         )
     )
 
-    private fun buildToolResultRagPrompt(
-        results: List<Pair<ToolResultArchiveEntity, Float>>,
-        maxChars: Int,
-    ): String {
-        if (results.isEmpty()) return ""
-        val hardLimit = maxChars.coerceAtLeast(0)
-        if (hardLimit == 0) return ""
-
-        val builder = StringBuilder()
-        builder.appendLine("## Tool Results (RAG)")
-        builder.appendLine("Retrieved from archived tool calls in this conversation.")
-
-        val perItemSoftLimit = 1600
-        results.forEach { (entity, score) ->
-            if (builder.length >= hardLimit) return@forEach
-
-            val header = "- tool=${entity.toolName} tool_call_id=${entity.toolCallId} score=${
-                String.format(Locale.US, "%.3f", score)
-            }"
-            val headerLine = header.take((hardLimit - builder.length).coerceAtLeast(0))
-            if (headerLine.isBlank()) return@forEach
-            builder.appendLine(headerLine)
-
-            val snippet = entity.extractText.trim().take(perItemSoftLimit)
-            if (snippet.isNotBlank() && builder.length < hardLimit) {
-                val indented = snippet.prependIndent("  ")
-                val remaining = (hardLimit - builder.length).coerceAtLeast(0)
-                if (remaining > 0) {
-                    builder.appendLine(indented.take(remaining))
+    private fun buildSessionMemoryTools(
+        getMemories: () -> List<SessionMemory>,
+        onChange: suspend (List<SessionMemory>) -> Unit,
+    ) = listOf(
+        Tool(
+            name = "create_session_memory",
+            description = "Create a memory that stays active only in the current conversation.",
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("content", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Important detail to keep active in the current conversation.")
+                        })
+                    },
+                    required = listOf("content"),
+                )
+            },
+            execute = { args ->
+                val content = args.jsonObject["content"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?: error("content is required")
+                validateSessionMemoryContent(content)
+                val current = getMemories()
+                val existing = current.firstOrNull { it.content.equals(content, ignoreCase = true) }
+                if (existing != null) {
+                    json.encodeToJsonElement(SessionMemory.serializer(), existing)
+                } else {
+                    if (current.size >= SESSION_MEMORY_MAX_COUNT) {
+                        error("session memory limit reached; edit an existing memory instead")
+                    }
+                    val now = System.currentTimeMillis()
+                    val created = SessionMemory(
+                        id = nextSessionMemoryId(current),
+                        content = content,
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                    onChange(current + created)
+                    json.encodeToJsonElement(SessionMemory.serializer(), created)
                 }
-            }
-        }
+            },
+        ),
+        Tool(
+            name = "edit_session_memory",
+            description = "Update an existing memory that applies only to the current conversation.",
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("id", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "ID of the session memory to update.")
+                        })
+                        put("content", buildJsonObject {
+                            put("type", "string")
+                            put("description", "New content for the session memory.")
+                        })
+                    },
+                    required = listOf("id", "content"),
+                )
+            },
+            execute = { args ->
+                val params = args.jsonObject
+                val id = params["id"]?.jsonPrimitive?.intOrNull
+                    ?: error("id is required")
+                val content = params["content"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?: error("content is required")
+                validateSessionMemoryContent(content)
+                val current = getMemories()
+                val existing = current.firstOrNull { it.id == id }
+                    ?: error("session memory not found")
+                val updated = existing.copy(
+                    content = content,
+                    updatedAt = System.currentTimeMillis(),
+                )
+                onChange(current.map { memory -> if (memory.id == id) updated else memory })
+                json.encodeToJsonElement(SessionMemory.serializer(), updated)
+            },
+        ),
+        Tool(
+            name = "delete_session_memory",
+            description = "Delete a memory that no longer applies to the current conversation.",
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("id", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "ID of the session memory to delete.")
+                        })
+                    },
+                    required = listOf("id"),
+                )
+            },
+            execute = { args ->
+                val id = args.jsonObject["id"]?.jsonPrimitive?.intOrNull
+                    ?: error("id is required")
+                val current = getMemories()
+                val updated = current.filterNot { it.id == id }
+                if (updated.size == current.size) {
+                    error("session memory not found")
+                }
+                onChange(updated)
+                JsonPrimitive(true)
+            },
+        ),
+    )
 
-        return builder.toString().trim().take(hardLimit)
+    private fun nextSessionMemoryId(memories: List<SessionMemory>): Int {
+        return (memories.maxOfOrNull { it.id } ?: 0) + 1
     }
 
-    private fun buildToolResultChunkRagPrompt(
-        results: List<Pair<ToolResultArchiveChunkEntity, Float>>,
-        maxChars: Int,
-    ): String {
-        if (results.isEmpty()) return ""
-        val hardLimit = maxChars.coerceAtLeast(0)
-        if (hardLimit == 0) return ""
-
-        val builder = StringBuilder()
-        builder.appendLine("## Tool Results (RAG)")
-        builder.appendLine("Retrieved from archived tool call chunks in this conversation.")
-
-        val perItemSoftLimit = 1200
-        results.forEach { (chunk, score) ->
-            if (builder.length >= hardLimit) return@forEach
-
-            val header = "- tool=${chunk.toolName} tool_call_id=${chunk.toolCallId} chunk=${chunk.chunkIndex} score=${
-                String.format(Locale.US, "%.3f", score)
-            }"
-            val headerLine = header.take((hardLimit - builder.length).coerceAtLeast(0))
-            if (headerLine.isBlank()) return@forEach
-            builder.appendLine(headerLine)
-
-            val snippet = chunk.chunkText.trim().take(perItemSoftLimit)
-            if (snippet.isNotBlank() && builder.length < hardLimit) {
-                val indented = snippet.prependIndent("  ")
-                val remaining = (hardLimit - builder.length).coerceAtLeast(0)
-                if (remaining > 0) {
-                    builder.appendLine(indented.take(remaining))
-                }
-            }
+    private fun validateSessionMemoryContent(content: String) {
+        if (content.isBlank()) {
+            error("content must not be empty")
         }
-
-        return builder.toString().trim().take(hardLimit)
+        if (content.length > SESSION_MEMORY_MAX_CONTENT_CHARS) {
+            error("content is too long; keep it under $SESSION_MEMORY_MAX_CONTENT_CHARS characters")
+        }
     }
 
-    private suspend fun buildMemoryPrompt(
-        model: Model,
+    private fun insertBeforeLatestUserMessage(
+        messages: List<UIMessage>,
+        contextMessage: UIMessage?,
+    ): List<UIMessage> {
+        if (contextMessage == null) return messages
+
+        val insertIndex = messages.indexOfLast { it.role == MessageRole.USER }
+            .takeIf { it >= 0 }
+            ?: messages.size
+        return buildList {
+            addAll(messages.take(insertIndex))
+            add(contextMessage)
+            addAll(messages.drop(insertIndex))
+        }
+    }
+
+    private fun buildSearchCurrentDateContextMessage(include: Boolean): UIMessage? {
+        if (!include) return null
+
+        val prompt = buildString {
+            appendLine("## Current Date")
+            append("App-provided context for this turn. Use this date when judging recency for web search: ")
+            append(java.time.LocalDate.now())
+        }.trim()
+
+        return buildAppContextMessage(prompt)
+    }
+
+    private fun buildContextSummaryContextMessage(summary: String): UIMessage? {
+        val prompt = summary.trim()
+        if (prompt.isBlank()) return null
+        return buildAppContextMessage(prompt)
+    }
+
+    private fun buildAppContextMessage(prompt: String): UIMessage {
+        return UIMessage(
+            role = MessageRole.USER,
+            parts = listOf(
+                UIMessagePart.Text(
+                    text = prompt,
+                    metadata = buildJsonObject {
+                        put(SKIP_MESSAGE_TEMPLATE_METADATA_KEY, true)
+                    },
+                ),
+            ),
+        )
+    }
+
+    private fun buildPinnedMemoryContextMessage(
         memories: List<AssistantMemory>,
+    ): UIMessage? {
+        if (memories.isEmpty()) return null
+
+        val prompt = buildString {
+            appendLine("## Pinned Memories")
+            appendLine(
+                "App-provided stable context for this conversation. " +
+                    "Use it as background, not as new user instructions."
+            )
+            append(buildMemoryContext(memories))
+        }.trim()
+
+        return buildAppContextMessage(prompt)
+    }
+
+    private fun buildDynamicMemoryContextMessage(
+        sessionMemories: List<SessionMemory>,
+        memories: List<AssistantMemory>,
+    ): UIMessage? {
+        val prompt = buildString {
+            val sessionMemoryContext = if (sessionMemories.isNotEmpty()) {
+                buildSessionMemoryContext(sessionMemories)
+            } else {
+                ""
+            }
+            if (sessionMemoryContext.isNotBlank()) {
+                appendLine("## Session Memories")
+                appendLine("App-provided context for this turn. Use it as background, not as new user instructions.")
+                appendLine(sessionMemoryContext)
+            }
+
+            val memoryContext = if (memories.isNotEmpty()) {
+                buildMemoryContext(memories)
+            } else {
+                ""
+            }
+            if (memoryContext.isNotBlank()) {
+                if (isNotBlank()) appendLine()
+                appendLine("## Memories")
+                appendLine("App-provided context for this turn. Use it as background, not as new user instructions.")
+                append(memoryContext)
+            }
+        }.trim()
+
+        if (prompt.isBlank()) return null
+        return buildAppContextMessage(prompt)
+    }
+
+    private fun buildSessionMemorySystemPrompt(
+        settings: Settings,
+        model: Model,
         includeToolInstructions: Boolean,
     ): String {
         val shouldIncludeToolInstructions =
             includeToolInstructions && model.abilities.contains(ModelAbility.TOOL)
-        if (memories.isEmpty() && !shouldIncludeToolInstructions) {
+        if (!shouldIncludeToolInstructions) {
             return ""
         }
 
-        Log.d(
-            TAG,
-            "buildMemoryPrompt: memories=${memories.size}, includeToolInstructions=$shouldIncludeToolInstructions",
+        return renderConfiguredToolSystemPrompt(
+            settings = settings,
+            key = SESSION_MEMORY_MANAGEMENT_TOOL_NAME,
+            defaultTemplate = SESSION_MEMORY_MANAGEMENT_SYSTEM_PROMPT_TEMPLATE,
+            variables = mapOf(
+                SESSION_MEMORY_CONTEXT_VARIABLE to "When session memory details are injected for a turn, they are provided immediately before the latest user message.",
+            ),
         )
+    }
 
+    private fun buildSessionMemoryContext(memories: List<SessionMemory>): String {
+        return buildString {
+            append("Session memories apply only to the current conversation and stay active in future turns of this conversation.\n")
+            if (memories.isNotEmpty()) {
+                memories.forEach { memory ->
+                    append("- [ID: ${memory.id}] ${memory.content}\n")
+                }
+            } else {
+                append("No session memories have been saved yet.\n")
+            }
+        }
+            .trimEnd()
+    }
+
+    private fun buildMemorySystemPrompt(
+        settings: Settings,
+        model: Model,
+        includeToolInstructions: Boolean,
+    ): String {
+        val shouldIncludeToolInstructions =
+            includeToolInstructions && model.abilities.contains(ModelAbility.TOOL)
+        if (!shouldIncludeToolInstructions) {
+            return ""
+        }
+
+        return renderConfiguredToolSystemPrompt(
+            settings = settings,
+            key = MEMORY_MANAGEMENT_TOOL_NAME,
+            defaultTemplate = MEMORY_MANAGEMENT_SYSTEM_PROMPT_TEMPLATE,
+            variables = mapOf(
+                MEMORY_CONTEXT_VARIABLE to (
+                    "Pinned memory details are placed near the start of the request when present. " +
+                        "Other memory details are provided immediately before the latest user message."
+                ),
+            ),
+        )
+    }
+
+    private fun List<AssistantMemory>.withStablePinnedPrefix(): List<AssistantMemory> {
+        return filter { it.pinned }.sortedByMemoryTime() + filterNot { it.pinned }
+    }
+
+    private fun List<AssistantMemory>.sortedByMemoryTime(): List<AssistantMemory> {
+        return sortedWith(compareBy<AssistantMemory> { it.timestamp }.thenBy { it.id })
+    }
+
+    private fun buildMemoryContext(memories: List<AssistantMemory>): String {
         val coreMemories = memories.filter { it.type == 0 } // CORE
         val episodicMemories = memories.filter { it.type == 1 } // EPISODIC
-        
+
         return buildString {
             if (memories.isNotEmpty()) {
-                append("## Memories\n")
                 append("These are memories that you can reference in the future conversations.\n")
             } else {
-                append("## Memories\n")
                 append("No memories were injected for this turn (none exist, none matched, or embeddings are unavailable).\n")
             }
-            
+
             if (coreMemories.isNotEmpty()) {
                 append("### Core Memories\n")
                 coreMemories.forEach { memory ->
@@ -1677,88 +1961,12 @@ class GenerationHandler(
 
             if (episodicMemories.isNotEmpty()) {
                 append("### Episodic Memories\n")
-                
-                val now = java.time.LocalDate.now()
-                val yesterday = now.minusDays(1)
-                val lastWeek = now.minusWeeks(1)
-                
-                val groupedEpisodes = episodicMemories.groupBy { memory ->
-                    val date = java.time.Instant.ofEpochMilli(memory.timestamp)
-                        .atZone(java.time.ZoneId.systemDefault())
-                        .toLocalDate()
-                    
-                    when {
-                        date.isEqual(now) -> "Today"
-                        date.isEqual(yesterday) -> "Yesterday"
-                        date.isAfter(lastWeek) -> "This Week"
-                        else -> "Older"
-                    }
-                }
-                
-                // Order: Today -> Yesterday -> This Week -> Older
-                listOf("Today", "Yesterday", "This Week", "Older").forEach { group ->
-                    val memoriesInGroup = groupedEpisodes[group]
-                    if (!memoriesInGroup.isNullOrEmpty()) {
-                        append("#### $group\n")
-                        memoriesInGroup.sortedByDescending { it.timestamp }.forEach { memory ->
-                            append("- ${memory.content}\n")
-                        }
-                    }
+                episodicMemories.sortedByMemoryTime().forEach { memory ->
+                    append("- ${memory.content}\n")
                 }
             }
-            
-            if (shouldIncludeToolInstructions) {
-                append(
-                    """
-                        
-                        ## Memory Tool
-                        You are a stateless large language model; you **cannot store memories** internally. To remember information, you must use **memory tools**.
-                        Memory tools allow you (the assistant) to store multiple pieces of information (records) to recall details across conversations.
-                        You can use the `create_memory`, `edit_memory`, and `delete_memory` tools to create, update, or delete memories.
-                        - If there is no relevant information in memory, call `create_memory` to create a new record.
-                        - If a relevant record already exists, call `edit_memory` to update it.
-                        - If a memory is outdated or no longer useful, call `delete_memory` to remove it.
-                        **Note:** You can only edit or delete **Core Memories** (which have an ID). Episodic Memories are read-only context.
-                        
-                        **Do not store sensitive information.** Sensitive information includes: ethnicity, religious beliefs, sexual orientation, political views, sexual life, criminal records, etc.
-                        During chats, act like a personal secretary and **proactively** record user-related information, including but not limited to:
-                        - Name/Nickname
-                        - Age/Gender/Hobbies
-                        - Plans/To-do items
-                    """.trimIndent()
-                )
-            }
         }
-    }
-
-    private fun shouldRetry429(
-        throwable: Throwable,
-        attempt: Int,
-        maxRetries: Int,
-        emittedAnyChunk: Boolean = false,
-    ): Boolean {
-        if (throwable is CancellationException) return false
-        if (maxRetries <= 0) return false
-        if (emittedAnyChunk) return false
-        if (!throwable.hasHttpStatusCode(429)) return false
-        return attempt <= maxRetries
-    }
-
-    private fun compute429RetryDelayMs(attempt: Int): Long {
-        val exponent = (attempt - 1).coerceIn(0, 3)
-        return 1_000L shl exponent
-    }
-
-    private fun Throwable.hasHttpStatusCode(targetCode: Int): Boolean {
-        val visited = HashSet<Throwable>()
-        var current: Throwable? = this
-        while (current != null && visited.add(current)) {
-            if (current is HttpStatusException && current.statusCode == targetCode) {
-                return true
-            }
-            current = current.cause
-        }
-        return false
+            .trimEnd()
     }
 
     fun translateText(
@@ -1784,16 +1992,19 @@ class GenerationHandler(
             var messages = listOf(UIMessage.user(prompt))
             var translatedText = ""
 
+            var requestBodyJson: String? = null
             val params = TextGenerationParams(
                 model = model,
                 temperature = 0.3f,
+                onRequestBody = { requestBodyJson = it },
             )
             val requestMessages = messages
             val startAt = System.currentTimeMillis()
             var firstChunkAt: Long? = null
             var failure: Throwable? = null
             val rawResponseText = StringBuilder()
-            val max429Retries = settings.getHttp429MaxRetries()
+            val maxHttpRetries = settings.getHttpRetryMaxRetries()
+            val httpRetryDelayMs = computeHttpRetryDelayMs(settings.getHttpRetryDelaySeconds())
             var streamAttempt = 0
             try {
                 while (true) {
@@ -1823,17 +2034,16 @@ class GenerationHandler(
                         }
                         break
                     } catch (t: Throwable) {
-                        if (!shouldRetry429(t, attempt = streamAttempt, maxRetries = max429Retries, emittedAnyChunk = emittedAnyChunk)) {
+                        if (!shouldRetryHttpRequest(t, attempt = streamAttempt, maxRetries = maxHttpRetries, emittedAnyChunk = emittedAnyChunk)) {
                             throw t
                         }
 
-                        val delayMs = compute429RetryDelayMs(attempt = streamAttempt)
                         Log.w(
                             TAG,
-                            "translateText(stream): got HTTP 429, retry ${streamAttempt}/$max429Retries in ${delayMs}ms",
+                            "translateText(stream): got retryable HTTP/network error, retry ${streamAttempt}/$maxHttpRetries in ${httpRetryDelayMs}ms",
                             t,
                         )
-                        delay(delayMs)
+                        delay(httpRetryDelayMs)
                     }
                 }
             } catch (t: Throwable) {
@@ -1845,6 +2055,7 @@ class GenerationHandler(
                     providerSetting = provider,
                     params = params,
                     requestMessages = requestMessages,
+                    requestBodyJson = requestBodyJson,
                     responseText = translatedText,
                     responseRawText = rawResponseText.toString(),
                     stream = true,
@@ -1856,6 +2067,7 @@ class GenerationHandler(
         } else {
             // Use Qwen MT model with special translation options
             val messages = listOf(UIMessage.user(sourceText))
+            var requestBodyJson: String? = null
             val params = TextGenerationParams(
                 model = model,
                 temperature = 0.3f,
@@ -1871,13 +2083,15 @@ class GenerationHandler(
                             )
                         }
                     )
-                )
+                ),
+                onRequestBody = { requestBodyJson = it },
             )
             val startAt = System.currentTimeMillis()
             var failure: Throwable? = null
             var translatedText = ""
             var rawResponseText = ""
-            val max429Retries = settings.getHttp429MaxRetries()
+            val maxHttpRetries = settings.getHttpRetryMaxRetries()
+            val httpRetryDelayMs = computeHttpRetryDelayMs(settings.getHttpRetryDelaySeconds())
             var nonStreamAttempt = 0
             try {
                 while (true) {
@@ -1892,17 +2106,16 @@ class GenerationHandler(
                         translatedText = response.choices.firstOrNull()?.message?.toContentText() ?: ""
                         break
                     } catch (t: Throwable) {
-                        if (!shouldRetry429(t, attempt = nonStreamAttempt, maxRetries = max429Retries)) {
+                        if (!shouldRetryHttpRequest(t, attempt = nonStreamAttempt, maxRetries = maxHttpRetries)) {
                             throw t
                         }
 
-                        val delayMs = compute429RetryDelayMs(attempt = nonStreamAttempt)
                         Log.w(
                             TAG,
-                            "translateText(non-stream): got HTTP 429, retry ${nonStreamAttempt}/$max429Retries in ${delayMs}ms",
+                            "translateText(non-stream): got retryable HTTP/network error, retry ${nonStreamAttempt}/$maxHttpRetries in ${httpRetryDelayMs}ms",
                             t,
                         )
-                        delay(delayMs)
+                        delay(httpRetryDelayMs)
                     }
                 }
             } catch (t: Throwable) {
@@ -1914,6 +2127,7 @@ class GenerationHandler(
                     providerSetting = provider,
                     params = params,
                     requestMessages = messages,
+                    requestBodyJson = requestBodyJson,
                     responseText = translatedText,
                     responseRawText = rawResponseText,
                     stream = false,

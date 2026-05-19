@@ -20,14 +20,7 @@ import kotlin.uuid.Uuid
 
 object ChatSearchTools {
 
-    private const val TOOL_DESCRIPTION =
-        "Search the user's past chat conversations by keywords. " +
-            "Use this when the user refers to a previous discussion, asks \"did we talk about X\", " +
-            "or when you need context from an older conversation. " +
-            "Within one query string, space means AND (every term must match). " +
-            "Multiple query strings mean OR (any one matching is enough). " +
-            "Wrap a phrase with double quotes to keep it as one term. " +
-            "Do NOT use this for the current conversation — only for past ones."
+    private const val TOOL_DESCRIPTION = "Search the user's past chat conversations."
 
     private const val MAX_QUERIES = 8
     private const val MAX_LIMIT = 10
@@ -73,6 +66,7 @@ object ChatSearchTools {
                     required = listOf("queries"),
                 )
             },
+            systemPrompt = { _, _ -> CHAT_SEARCH_SYSTEM_PROMPT_TEMPLATE },
             execute = { args ->
                 executeSearch(args.jsonObject, assistantId, currentConversationId, conversationRepo)
             },

@@ -62,6 +62,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.UsedLorebookEntry
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.getEffectiveDisplaySetting
+import me.rerere.rikkahub.data.model.SessionMemory
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
@@ -84,6 +85,9 @@ fun ColumnScope.ChatMessageActionButtons(
     onEditLorebookEntry: ((UsedLorebookEntry) -> Unit)? = null,
     onModeClick: ((me.rerere.ai.ui.UsedMode) -> Unit)? = null,
     onMemoryClick: ((me.rerere.ai.ui.UsedMemory) -> Unit)? = null,
+    currentSessionMemories: List<SessionMemory> = emptyList(),
+    onUpdateSessionMemory: ((memoryId: Int, content: String) -> Unit)? = null,
+    onDeleteSessionMemory: ((memoryId: Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val settings = LocalSettings.current
@@ -95,7 +99,11 @@ fun ColumnScope.ChatMessageActionButtons(
     val usedEntries = message.usedLorebookEntries ?: emptyList()
     val usedModes = message.usedModes ?: emptyList()
     val usedMemories = message.usedMemories ?: emptyList()
-    val hasContextSources = usedEntries.isNotEmpty() || usedModes.isNotEmpty() || usedMemories.isNotEmpty()
+    val usedSessionMemories = message.usedSessionMemories ?: emptyList()
+    val hasContextSources = usedEntries.isNotEmpty() ||
+        usedModes.isNotEmpty() ||
+        usedMemories.isNotEmpty() ||
+        usedSessionMemories.isNotEmpty()
     val showContextStacks = effectiveDisplay.showContextStacks && hasContextSources
     val regenerateInteractionSource = remember { MutableInteractionSource() }
     val isRegeneratePressed by regenerateInteractionSource.collectIsPressedAsState()
@@ -117,6 +125,8 @@ fun ColumnScope.ChatMessageActionButtons(
         ContextSourcesSheet(
             modes = usedModes,
             memories = usedMemories,
+            sessionMemories = usedSessionMemories,
+            currentSessionMemories = currentSessionMemories,
             entries = usedEntries,
             onModeClick = { mode ->
                 showContextSheet = false
@@ -126,6 +136,8 @@ fun ColumnScope.ChatMessageActionButtons(
                 showContextSheet = false
                 onMemoryClick?.invoke(memory)
             },
+            onSessionMemorySave = onUpdateSessionMemory,
+            onSessionMemoryDelete = onDeleteSessionMemory,
             onEntryClick = { entry ->
                 showContextSheet = false
                 onEditLorebookEntry?.invoke(entry)
@@ -143,6 +155,7 @@ fun ColumnScope.ChatMessageActionButtons(
             ContextStackIndicator(
                 modes = usedModes,
                 memories = usedMemories,
+                sessionMemories = usedSessionMemories,
                 entries = usedEntries,
                 onClick = { showContextSheet = true },
                 modifier = Modifier.padding(start = 4.dp)

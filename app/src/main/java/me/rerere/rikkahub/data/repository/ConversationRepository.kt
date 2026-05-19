@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
 import me.rerere.rikkahub.data.db.dao.ChatSearchResultRow
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
@@ -38,6 +39,7 @@ import me.rerere.rikkahub.data.db.entity.DailyActivityEntity
 import me.rerere.rikkahub.data.db.entity.MemoryType
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.SessionMemory
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.deleteChatFiles
@@ -217,6 +219,7 @@ class ConversationRepository(
                 lastPruneMessageCount = entity.lastPruneMessageCount,
                 lastRefreshTime = entity.lastRefreshTime,
                 contextSummaryBoundaries = entity.contextSummaryBoundaries,
+                sessionMemories = entity.sessionMemories,
             )
         )
         JsonInstantPretty.encodeToString(payload)
@@ -354,6 +357,7 @@ class ConversationRepository(
             lastPruneMessageCount = conversation.lastPruneMessageCount,
             lastRefreshTime = conversation.lastRefreshTime,
             contextSummaryBoundaries = JsonInstant.encodeToString(normalizedSummaryBoundaries),
+            sessionMemories = JsonInstant.encodeToString(conversation.sessionMemories),
         )
     }
 
@@ -373,6 +377,7 @@ class ConversationRepository(
             emptyList()
         }
         val summaryBoundaries = normalizeContextSummaryBoundaries(parsedSummaryBoundaries)
+        val sessionMemories = decodeSessionMemories(conversationEntity.sessionMemories)
         return Conversation(
             id = Uuid.parse(conversationEntity.id),
             title = conversationEntity.title,
@@ -391,9 +396,33 @@ class ConversationRepository(
             lastPruneMessageCount = conversationEntity.lastPruneMessageCount,
             lastRefreshTime = conversationEntity.lastRefreshTime,
             contextSummaryBoundaries = summaryBoundaries,
+            sessionMemories = sessionMemories,
             loadedNodeStartIndex = decodedWindow.startIndex,
             totalMessageNodeCount = decodedWindow.totalCount,
         )
+    }
+
+    private fun decodeSessionMemories(raw: String): List<SessionMemory> {
+        return runCatching {
+            JsonInstant.decodeFromString<List<SessionMemory>>(raw)
+        }.getOrElse {
+            val array = runCatching { JsonInstant.parseToJsonElement(raw) as? JsonArray }
+                .getOrNull()
+                ?: return emptyList()
+            array.mapIndexedNotNull { index, element ->
+                val obj = element as? JsonObject ?: return@mapIndexedNotNull null
+                val content = obj["content"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?: return@mapIndexedNotNull null
+                if (content.isBlank()) return@mapIndexedNotNull null
+                val createdAt = obj["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L
+                SessionMemory(
+                    id = index + 1,
+                    content = content,
+                    createdAt = createdAt,
+                    updatedAt = obj["updatedAt"]?.jsonPrimitive?.longOrNull ?: createdAt,
+                )
+            }
+        }
     }
 
     suspend fun loadOlderMessageNodeChunk(
@@ -1150,6 +1179,8 @@ private data class RawConversationEntity(
     val lastRefreshTime: Long,
     @SerialName("context_summary_boundaries")
     val contextSummaryBoundaries: String,
+    @SerialName("session_memories")
+    val sessionMemories: String = "[]",
 )
 
 /**

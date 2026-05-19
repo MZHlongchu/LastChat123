@@ -24,6 +24,7 @@ import kotlinx.serialization.json.putJsonObject
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.parametersOrEmptyObject
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Modality
@@ -153,6 +154,8 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
         params: TextGenerationParams,
     ): MessageChunk = withContext(Dispatchers.IO) {
         val requestBody = buildCompletionRequestBody(messages, params)
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -169,7 +172,7 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
                 .url(url)
                 .headers(params.customHeaders.toHeaders())
                 .post(
-                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                    requestBodyJson.toRequestBody("application/json".toMediaType())
                 )
                 .configureReferHeaders(providerSetting.baseUrl)
                 .build()
@@ -236,6 +239,8 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
         params: TextGenerationParams,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildCompletionRequestBody(messages, params)
+        val requestBodyJson = json.encodeToString(requestBody)
+        params.onRequestBody?.invoke(requestBodyJson)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -252,13 +257,13 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
                 .url(url)
                 .headers(params.customHeaders.toHeaders())
                 .post(
-                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                    requestBodyJson.toRequestBody("application/json".toMediaType())
                 )
                 .configureReferHeaders(providerSetting.baseUrl)
                 .build()
         )
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: $requestBodyJson")
         val rawEventBuffer = StringBuilder()
 
         val listener = object : EventSourceListener() {
@@ -487,7 +492,7 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
                                 put("description", JsonPrimitive(tool.description))
                                 put(
                                     key = "parameters",
-                                    element = json.encodeToJsonElement(tool.parameters())
+                                    element = json.encodeToJsonElement(tool.parametersOrEmptyObject())
                                         .removeElements(
                                             listOf(
                                                 "const",
@@ -668,95 +673,102 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
         return buildJsonArray {
             messages
                 .filter { it.role != MessageRole.SYSTEM && it.isValidToUpload() }
-                .forEachIndexed { index, message ->
-                    add(buildJsonObject {
-                        put("role", commonRoleToGoogleRole(message.role))
-                        putJsonArray("parts") {
-                            for (part in message.parts) {
-                                when (part) {
-                                    is UIMessagePart.Text -> {
+                .forEach { message ->
+                    val parts = buildJsonArray {
+                        for (part in message.parts) {
+                            when (part) {
+                                is UIMessagePart.Text -> {
+                                    if (part.text.isBlank()) continue
+                                    add(buildJsonObject {
+                                        put("text", part.text)
+                                        part.metadata?.get("thoughtSignature")?.let {
+                                            put("thoughtSignature", it)
+                                        }
+                                    })
+                                }
+
+                                is UIMessagePart.Image -> {
+                                    part.encodeBase64(false).onSuccess { base64Data ->
                                         add(buildJsonObject {
-                                            put("text", part.text)
-                                            part.metadata?.get("thoughtSignature")?.let {
-                                                put("thoughtSignature", it)
-                                            }
-                                        })
-                                    }
-
-                                    is UIMessagePart.Image -> {
-                                        part.encodeBase64(false).onSuccess { base64Data ->
-                                            add(buildJsonObject {
-                                                put("inline_data", buildJsonObject {
-                                                    put("mime_type", "image/png")
-                                                    put("data", base64Data)
-                                                })
-                                                part.metadata?.get("thoughtSignature")?.let {
-                                                    put("thoughtSignature", it)
-                                                }
-                                            })
-                                        }
-                                    }
-
-                                    is UIMessagePart.Video -> {
-                                        part.encodeBase64(false).onSuccess { base64Data ->
-                                            add(buildJsonObject {
-                                                put("inline_data", buildJsonObject {
-                                                    put("mime_type", "video/mp4")
-                                                    put("data", base64Data)
-                                                })
-                                                part.metadata?.get("thoughtSignature")?.let {
-                                                    put("thoughtSignature", it)
-                                                }
-                                            })
-                                        }
-                                    }
-
-                                    is UIMessagePart.Audio -> {
-                                        part.encodeBase64(false).onSuccess { base64Data ->
-                                            add(buildJsonObject {
-                                                put("inline_data", buildJsonObject {
-                                                    put("mime_type", "audio/mp3")
-                                                    put("data", base64Data)
-                                                })
-                                                part.metadata?.get("thoughtSignature")?.let {
-                                                    put("thoughtSignature", it)
-                                                }
-                                            })
-                                        }
-                                    }
-
-                                    is UIMessagePart.ToolCall -> {
-                                        add(buildJsonObject {
-                                            put("functionCall", buildJsonObject {
-                                                put("name", part.toolName)
-                                                put("args", json.parseToJsonElement(part.arguments))
+                                            put("inlineData", buildJsonObject {
+                                                put("mimeType", "image/png")
+                                                put("data", base64Data.toGoogleInlineDataPayload())
                                             })
                                             part.metadata?.get("thoughtSignature")?.let {
                                                 put("thoughtSignature", it)
                                             }
                                         })
                                     }
+                                }
 
-                                    is UIMessagePart.ToolResult -> {
+                                is UIMessagePart.Video -> {
+                                    part.encodeBase64(false).onSuccess { base64Data ->
                                         add(buildJsonObject {
-                                            put("functionResponse", buildJsonObject {
-                                                put("name", part.toolName)
-                                                put("response", buildJsonObject {
-                                                    put("result", part.content)
-                                                })
+                                            put("inlineData", buildJsonObject {
+                                                put("mimeType", "video/mp4")
+                                                put("data", base64Data.toGoogleInlineDataPayload())
                                             })
+                                            part.metadata?.get("thoughtSignature")?.let {
+                                                put("thoughtSignature", it)
+                                            }
                                         })
                                     }
+                                }
 
-                                    else -> {
-                                        // Unsupported part type
+                                is UIMessagePart.Audio -> {
+                                    part.encodeBase64(false).onSuccess { base64Data ->
+                                        add(buildJsonObject {
+                                            put("inlineData", buildJsonObject {
+                                                put("mimeType", "audio/mp3")
+                                                put("data", base64Data.toGoogleInlineDataPayload())
+                                            })
+                                            part.metadata?.get("thoughtSignature")?.let {
+                                                put("thoughtSignature", it)
+                                            }
+                                        })
                                     }
+                                }
+
+                                is UIMessagePart.ToolCall -> {
+                                    add(buildJsonObject {
+                                        put("functionCall", buildJsonObject {
+                                            put("name", part.toolName)
+                                            put("args", json.parseToJsonElement(part.arguments))
+                                        })
+                                        part.metadata?.get("thoughtSignature")?.let {
+                                            put("thoughtSignature", it)
+                                        }
+                                    })
+                                }
+
+                                is UIMessagePart.ToolResult -> {
+                                    add(buildJsonObject {
+                                        put("functionResponse", buildJsonObject {
+                                            put("name", part.toolName)
+                                            put("response", buildJsonObject {
+                                                put("result", part.content)
+                                            })
+                                        })
+                                    })
+                                }
+
+                                else -> {
+                                    // Unsupported part type
                                 }
                             }
                         }
+                    }
+                    if (parts.isEmpty()) return@forEach
+                    add(buildJsonObject {
+                        put("role", commonRoleToGoogleRole(message.role))
+                        put("parts", parts)
                     })
                 }
         }
+    }
+
+    private fun String.toGoogleInlineDataPayload(): String {
+        return substringAfter("base64,", this)
     }
 
     private fun parseUsageMeta(jsonObject: JsonObject?): TokenUsage? {
@@ -861,16 +873,7 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
         // For single input, use embedContent endpoint
         // For multiple inputs, use batchEmbedContents endpoint
         if (input.size == 1) {
-            val requestBody = buildJsonObject {
-                put("model", "models/${model.modelId}")
-                put("content", buildJsonObject {
-                    putJsonArray("parts") {
-                        add(buildJsonObject {
-                            put("text", input.first())
-                        })
-                    }
-                })
-            }
+            val requestBody = buildEmbeddingRequestBody(input = input, model = model)
 
             val url = buildUrl(
                 providerSetting = providerSetting,
@@ -916,22 +919,7 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
             listOf(values.map { it.jsonPrimitive.content.toFloat() })
         } else {
             // Batch embedding
-            val requestBody = buildJsonObject {
-                putJsonArray("requests") {
-                    input.forEach { text ->
-                        add(buildJsonObject {
-                            put("model", "models/${model.modelId}")
-                            put("content", buildJsonObject {
-                                putJsonArray("parts") {
-                                    add(buildJsonObject {
-                                        put("text", text)
-                                    })
-                                }
-                            })
-                        })
-                    }
-                }
-            }
+            val requestBody = buildEmbeddingRequestBody(input = input, model = model)
 
             val url = buildUrl(
                 providerSetting = providerSetting,
@@ -974,6 +962,47 @@ class GoogleProvider(private val client: OkHttpClient) : Provider<ProviderSettin
                 val values = embeddingObj.jsonObject["values"]?.jsonArray
                     ?: error("No values in embedding")
                 values.map { it.jsonPrimitive.content.toFloat() }
+            }
+        }
+    }
+
+    override fun buildEmbeddingRequestBodyForLog(
+        providerSetting: ProviderSetting.Google,
+        input: List<String>,
+        model: Model,
+    ): String? {
+        if (input.isEmpty()) return null
+        return json.encodeToString(buildEmbeddingRequestBody(input = input, model = model))
+    }
+
+    private fun buildEmbeddingRequestBody(input: List<String>, model: Model): JsonObject {
+        return if (input.size == 1) {
+            buildJsonObject {
+                put("model", "models/${model.modelId}")
+                put("content", buildJsonObject {
+                    putJsonArray("parts") {
+                        add(buildJsonObject {
+                            put("text", input.first())
+                        })
+                    }
+                })
+            }
+        } else {
+            buildJsonObject {
+                putJsonArray("requests") {
+                    input.forEach { text ->
+                        add(buildJsonObject {
+                            put("model", "models/${model.modelId}")
+                            put("content", buildJsonObject {
+                                putJsonArray("parts") {
+                                    add(buildJsonObject {
+                                        put("text", text)
+                                    })
+                                }
+                            })
+                        })
+                    }
+                }
             }
         }
     }

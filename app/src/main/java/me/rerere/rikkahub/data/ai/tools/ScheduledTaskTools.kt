@@ -37,8 +37,11 @@ fun createScheduledTaskTools(
 
 private fun buildListTool(assistantId: Uuid, taskDao: ScheduledTaskDao) = Tool(
     name = "list_scheduled_tasks",
-    description = "List all scheduled tasks belonging to the current assistant.",
-    parameters = { null },
+    description = "List scheduled tasks.",
+    parameters = {
+        InputSchema.Obj(properties = buildJsonObject { })
+    },
+    systemPrompt = { _, _ -> SCHEDULED_TASK_SYSTEM_PROMPT_TEMPLATE },
     execute = {
         val ids = withContext(Dispatchers.IO) {
             taskDao.getTaskIdsOfAssistant(assistantId.toString())
@@ -72,14 +75,7 @@ private fun buildCreateTool(
     scheduler: ScheduledTaskScheduler,
 ) = Tool(
     name = "create_scheduled_task",
-    description = """Create a new scheduled task for the current assistant.
-repeat_type values: "once", "daily", "weekly", "monthly", "interval"
-- once/daily/weekly/monthly: time_of_day is required (format "HH:mm")
-- weekly: weekly_days is required (array of "mon","tue","wed","thu","fri","sat","sun")
-- monthly: monthly_day is required (1-28, or -1 for last day of month)
-- interval: interval_value (int) and interval_unit ("hours" or "days") are required
-
-IMPORTANT — prompt_template must be written from the USER's perspective, as if the user is sending a message to the assistant. For example: "Please send me today's weather summary." NOT "Send the user a weather summary." Think of it as a message the user would type.""",
+    description = "Create a scheduled task.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -89,7 +85,7 @@ IMPORTANT — prompt_template must be written from the USER's perspective, as if
                 })
                 put("prompt_template", buildJsonObject {
                     put("type", "string")
-                    put("description", "The message sent as the user turn when the task runs. MUST be written from the user's perspective (e.g. 'Please give me a morning briefing for {date}.'), NOT from the assistant's perspective. Supports {date}, {time}, {weekday} placeholders.")
+                    put("description", "The user message sent when the task runs. Supports {date}, {time}, {weekday} placeholders.")
                 })
                 put("repeat_type", buildJsonObject {
                     put("type", "string")
@@ -250,7 +246,7 @@ private fun buildUpdateTool(
     scheduler: ScheduledTaskScheduler,
 ) = Tool(
     name = "update_scheduled_task",
-    description = "Update an existing scheduled task. Only provide the fields you want to change.",
+    description = "Update a scheduled task.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -264,7 +260,7 @@ private fun buildUpdateTool(
                 })
                 put("prompt_template", buildJsonObject {
                     put("type", "string")
-                    put("description", "New prompt template. Must be written from the user's perspective.")
+                    put("description", "New prompt template.")
                 })
                 put("repeat_type", buildJsonObject {
                     put("type", "string")
@@ -391,7 +387,7 @@ private fun buildDeleteTool(
     scheduler: ScheduledTaskScheduler,
 ) = Tool(
     name = "delete_scheduled_task",
-    description = "Delete a scheduled task permanently.",
+    description = "Delete a scheduled task.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
